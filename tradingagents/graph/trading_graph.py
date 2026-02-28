@@ -19,6 +19,7 @@ from tradingagents.agents.utils.agent_states import (
     RiskDebateState,
 )
 from tradingagents.dataflows.config import set_config
+from tradingagents.llm_factory import LLMFactory
 
 # Import the new abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
@@ -71,28 +72,26 @@ class TradingAgentsGraph:
             exist_ok=True,
         )
 
-        # Initialize LLMs with provider-specific thinking configuration
-        llm_kwargs = self._get_provider_kwargs()
+        # Initialize LLMs using factory
+        provider = self.config["llm_provider"].lower()
 
-        # Add callbacks to kwargs if provided (passed to LLM constructor)
-        if self.callbacks:
-            llm_kwargs["callbacks"] = self.callbacks
+        # For OpenAI-compatible APIs (ollama, openrouter), use "openai" provider
+        if provider in ["ollama", "openrouter"]:
+            provider = "openai"
 
-        deep_client = create_llm_client(
-            provider=self.config["llm_provider"],
+        self.deep_thinking_llm = LLMFactory.create_llm(
+            provider=provider,
             model=self.config["deep_think_llm"],
-            base_url=self.config.get("backend_url"),
-            **llm_kwargs,
-        )
-        quick_client = create_llm_client(
-            provider=self.config["llm_provider"],
-            model=self.config["quick_think_llm"],
-            base_url=self.config.get("backend_url"),
-            **llm_kwargs,
+            backend_url=self.config.get("backend_url"),
+            temperature=1.0
         )
 
-        self.deep_thinking_llm = deep_client.get_llm()
-        self.quick_thinking_llm = quick_client.get_llm()
+        self.quick_thinking_llm = LLMFactory.create_llm(
+            provider=provider,
+            model=self.config["quick_think_llm"],
+            backend_url=self.config.get("backend_url"),
+            temperature=1.0
+        )
         
         # Initialize memories
         self.bull_memory = FinancialSituationMemory("bull_memory", self.config)
