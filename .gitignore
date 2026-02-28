@@ -1,4 +1,7 @@
 # Byte-compiled / optimized / DLL files
+.venv
+results
+env/
 __pycache__/
 *.py[codz]
 *$py.class
@@ -21,6 +24,11 @@ sdist/
 var/
 wheels/
 share/python-wheels/
+.DS_Store
+*.csv
+/src/
+eval_results/
+eval_data/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -218,3 +226,20 @@ __marimo__/
 # Cache
 **/data_cache/
 portfolio_data/
+.env
+
+# Node.js
+node_modules/
+
+# Frontend dev artifacts
+.frontend-dev/
+
+# Runtime config
+schedule_config.json
+
+# Playwright MCP artifacts
+.playwright-mcp/
+
+# Test screenshots (root level)
+test-*.png
+prediction-accuracy-new.png

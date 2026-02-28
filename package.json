@@ -1,0 +1,34 @@
+{
+  "name": "tradingagents",
+  "version": "1.0.0",
+  "description": "Multi-Agent LLM Financial Trading Framework with AI-powered stock analysis, structured debates, and backtesting",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hemangjoshi37a/TradingAgents.git"
+  },
+  "keywords": [
+    "trading",
+    "ai",
+    "multi-agent",
+    "llm",
+    "stock-analysis",
+    "nifty50",
+    "backtesting",
+    "fastapi",
+    "react",
+    "financial-trading"
+  ],
+  "author": "hjlabs.in",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/hemangjoshi37a/TradingAgents/issues"
+  },
+  "homepage": "https://hjlabs.in",
+  "dependencies": {
+    "playwright": "^1.58.1"
+  }
+}

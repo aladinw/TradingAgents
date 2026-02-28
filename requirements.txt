@@ -1,79 +1,28 @@
-# =============================================================================
-# TradingAgents - Dependencies
-# =============================================================================
-# Aligned with pyproject.toml (v0.2.0)
-# Last updated: 2026-02-28
-# =============================================================================
-
-# Core LangChain Framework
-# -----------------------------------------------------------------------------
-langchain-core>=0.3.81
-langchain-openai>=0.3.23
-langchain-anthropic>=0.3.15
-langchain-google-genai>=2.1.5
-langchain-experimental>=0.3.4
-langgraph>=0.4.8
-
-# AI/ML API Clients
-# -----------------------------------------------------------------------------
-openai>=1.58.1
-
-# Data & Financial APIs
-# -----------------------------------------------------------------------------
-pandas>=2.3.0
-numpy>=1.24.0
-yfinance>=0.2.63
-eodhd>=1.0.25
-finnhub-python>=2.4.20
-akshare>=1.16.72
-tushare>=1.4.7
-
-# Web Scraping & Parsing
-# -----------------------------------------------------------------------------
-requests>=2.32.4
-feedparser>=6.0.11
-parsel>=1.10.0
-praw>=7.8.1
-
-# Technical Analysis & Backtesting
-# -----------------------------------------------------------------------------
-stockstats>=0.6.5
-backtrader>=1.9.78.123
-scikit-learn>=1.5.2
-
-# Database & Caching
-# -----------------------------------------------------------------------------
-chromadb>=0.5.23
-redis>=6.2.0
-pyarrow>=18.1.0
-
-# Web Interface
-# -----------------------------------------------------------------------------
-chainlit>=2.5.5
-
-# CLI & UI Utilities
-# -----------------------------------------------------------------------------
-rich>=14.0.0
-questionary>=2.1.0
-tqdm>=4.67.1
-typer>=0.21.0
-
-# Visualization
-# -----------------------------------------------------------------------------
-matplotlib>=3.7.0
-seaborn>=0.12.0
-scipy>=1.10.0
-
-# System Utilities
-# -----------------------------------------------------------------------------
-python-dotenv>=1.0.1
-pytz>=2025.2
-typing-extensions>=4.14.0
-setuptools>=80.9.0
-rank-bm25>=0.2.2
-
-# Testing & Development
-# -----------------------------------------------------------------------------
-pytest>=8.3.4
-pytest-cov>=6.0.0
-pytest-asyncio>=0.24.0
+typing-extensions
+langchain-openai
+langchain-experimental
+pandas
+yfinance
+praw
+feedparser
+stockstats
+eodhd
+langgraph
+chromadb
+setuptools
+backtrader
+akshare
+tushare
+finnhub-python
+parsel
+requests
+tqdm
+pytz
+redis
+chainlit
+rich
+questionary
+langchain_anthropic
+langchain-google-genai
+jugaad-data
+sentence-transformers

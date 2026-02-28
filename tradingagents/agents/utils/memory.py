@@ -1,106 +1,79 @@
-"""Financial situation memory using BM25 for lexical similarity matching.
-
-Uses BM25 (Best Matching 25) algorithm for retrieval - no API calls,
-no token limits, works offline with any LLM provider.
-"""
-
-from rank_bm25 import BM25Okapi
-from typing import List, Tuple
-import re
+import chromadb
+from chromadb.config import Settings
+from chromadb.utils import embedding_functions
 
 
 class FinancialSituationMemory:
-    """Memory system for storing and retrieving financial situations using BM25."""
+    """Memory system for storing and retrieving financial situations using local embeddings."""
 
-    def __init__(self, name: str, config: dict = None):
-        """Initialize the memory system.
+    def __init__(self, name, config):
+        """
+        Initialize the memory system with local embeddings.
 
         Args:
-            name: Name identifier for this memory instance
-            config: Configuration dict (kept for API compatibility, not used for BM25)
+            name: Name for the ChromaDB collection
+            config: Configuration dictionary (kept for compatibility)
         """
-        self.name = name
-        self.documents: List[str] = []
-        self.recommendations: List[str] = []
-        self.bm25 = None
+        # Use ChromaDB's default embedding function (uses all-MiniLM-L6-v2 internally)
+        self.embedding_fn = embedding_functions.DefaultEmbeddingFunction()
+        self.chroma_client = chromadb.Client(Settings(allow_reset=True))
+        # Use get_or_create to avoid errors when collection already exists
+        self.situation_collection = self.chroma_client.get_or_create_collection(
+            name=name,
+            embedding_function=self.embedding_fn
+        )
 
-    def _tokenize(self, text: str) -> List[str]:
-        """Tokenize text for BM25 indexing.
+    def get_embedding(self, text):
+        """Get embedding for a text using the embedding function."""
+        embeddings = self.embedding_fn([text])
+        return embeddings[0]
 
-        Simple whitespace + punctuation tokenization with lowercasing.
-        """
-        # Lowercase and split on non-alphanumeric characters
-        tokens = re.findall(r'\b\w+\b', text.lower())
-        return tokens
+    def add_situations(self, situations_and_advice):
+        """Add financial situations and their corresponding advice. Parameter is a list of tuples (situation, rec)"""
 
-    def _rebuild_index(self):
-        """Rebuild the BM25 index after adding documents."""
-        if self.documents:
-            tokenized_docs = [self._tokenize(doc) for doc in self.documents]
-            self.bm25 = BM25Okapi(tokenized_docs)
-        else:
-            self.bm25 = None
+        situations = []
+        advice = []
+        ids = []
 
-    def add_situations(self, situations_and_advice: List[Tuple[str, str]]):
-        """Add financial situations and their corresponding advice.
+        offset = self.situation_collection.count()
 
-        Args:
-            situations_and_advice: List of tuples (situation, recommendation)
-        """
-        for situation, recommendation in situations_and_advice:
-            self.documents.append(situation)
-            self.recommendations.append(recommendation)
+        for i, (situation, recommendation) in enumerate(situations_and_advice):
+            situations.append(situation)
+            advice.append(recommendation)
+            ids.append(str(offset + i))
 
-        # Rebuild BM25 index with new documents
-        self._rebuild_index()
+        # Let ChromaDB handle embeddings automatically
+        self.situation_collection.add(
+            documents=situations,
+            metadatas=[{"recommendation": rec} for rec in advice],
+            ids=ids,
+        )
 
-    def get_memories(self, current_situation: str, n_matches: int = 1) -> List[dict]:
-        """Find matching recommendations using BM25 similarity.
+    def get_memories(self, current_situation, n_matches=1):
+        """Find matching recommendations using embeddings"""
+        results = self.situation_collection.query(
+            query_texts=[current_situation],
+            n_results=n_matches,
+            include=["metadatas", "documents", "distances"],
+        )
 
-        Args:
-            current_situation: The current financial situation to match against
-            n_matches: Number of top matches to return
+        matched_results = []
+        if results["documents"] and results["documents"][0]:
+            for i in range(len(results["documents"][0])):
+                matched_results.append(
+                    {
+                        "matched_situation": results["documents"][0][i],
+                        "recommendation": results["metadatas"][0][i]["recommendation"],
+                        "similarity_score": 1 - results["distances"][0][i],
+                    }
+                )
 
-        Returns:
-            List of dicts with matched_situation, recommendation, and similarity_score
-        """
-        if not self.documents or self.bm25 is None:
-            return []
-
-        # Tokenize query
-        query_tokens = self._tokenize(current_situation)
-
-        # Get BM25 scores for all documents
-        scores = self.bm25.get_scores(query_tokens)
-
-        # Get top-n indices sorted by score (descending)
-        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:n_matches]
-
-        # Build results
-        results = []
-        max_score = max(scores) if max(scores) > 0 else 1  # Normalize scores
-
-        for idx in top_indices:
-            # Normalize score to 0-1 range for consistency
-            normalized_score = scores[idx] / max_score if max_score > 0 else 0
-            results.append({
-                "matched_situation": self.documents[idx],
-                "recommendation": self.recommendations[idx],
-                "similarity_score": normalized_score,
-            })
-
-        return results
-
-    def clear(self):
-        """Clear all stored memories."""
-        self.documents = []
-        self.recommendations = []
-        self.bm25 = None
+        return matched_results
 
 
 if __name__ == "__main__":
     # Example usage
-    matcher = FinancialSituationMemory("test_memory")
+    matcher = FinancialSituationMemory("test_memory", {})
 
     # Example data
     example_data = [

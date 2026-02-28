@@ -1,172 +1,311 @@
-<p align="center">
-  <img src="assets/TauricResearch.png" style="width: 60%; height: auto;">
-</p>
-
-<div align="center" style="line-height: 1;">
-  <a href="https://arxiv.org/abs/2412.20138" target="_blank"><img alt="arXiv" src="https://img.shields.io/badge/arXiv-2412.20138-B31B1B?logo=arxiv"/></a>
-  <a href="https://discord.com/invite/hk9PGKShPK" target="_blank"><img alt="Discord" src="https://img.shields.io/badge/Discord-TradingResearch-7289da?logo=discord&logoColor=white&color=7289da"/></a>
-  <a href="./assets/wechat.png" target="_blank"><img alt="WeChat" src="https://img.shields.io/badge/WeChat-TauricResearch-brightgreen?logo=wechat&logoColor=white"/></a>
-  <a href="https://x.com/TauricResearch" target="_blank"><img alt="X Follow" src="https://img.shields.io/badge/X-TauricResearch-white?logo=x&logoColor=white"/></a>
-  <br>
-  <a href="https://github.com/TauricResearch/" target="_blank"><img alt="Community" src="https://img.shields.io/badge/Join_GitHub_Community-TauricResearch-14C290?logo=discourse"/></a>
-</div>
-
 <div align="center">
-  <!-- Keep these links. Translations will automatically update with the README. -->
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=de">Deutsch</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=es">Español</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=fr">français</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ja">日本語</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ko">한국어</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=pt">Português</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ru">Русский</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=zh">中文</a>
+
+<img src="assets/schema.png" width="120" alt="TradingAgents - Multi-Agent LLM Financial Trading Framework Logo" />
+
+# TradingAgents
+
+### Multi-Agent LLM Financial Trading Framework
+
+[![arXiv](https://img.shields.io/badge/arXiv-2412.20138-B31B1B?logo=arxiv)](https://arxiv.org/abs/2412.20138)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![React](https://img.shields.io/badge/React_18-TypeScript-61DAFB?logo=react&logoColor=white)](https://react.dev/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4.0-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+
+[![Website](https://img.shields.io/badge/Website-hjlabs.in-FF6B6B?logo=googlechrome&logoColor=white)](https://hjlabs.in)
+[![GitHub stars](https://img.shields.io/github/stars/hemangjoshi37a/TradingAgents?style=social)](https://github.com/hemangjoshi37a/TradingAgents/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/hemangjoshi37a/TradingAgents?style=social)](https://github.com/hemangjoshi37a/TradingAgents/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/hemangjoshi37a/TradingAgents)](https://github.com/hemangjoshi37a/TradingAgents/issues)
+[![GitHub last commit](https://img.shields.io/github/last-commit/hemangjoshi37a/TradingAgents)](https://github.com/hemangjoshi37a/TradingAgents/commits/main)
+
+<br />
+
+An open-source framework that deploys **specialized AI agents** &mdash; analysts, researchers, traders, and risk managers &mdash; to collaboratively analyze markets and generate investment recommendations through structured debate.
+
+<br />
+
+[Getting Started](#getting-started) &nbsp;&bull;&nbsp; [Web Dashboard](#nifty50-ai-web-dashboard) &nbsp;&bull;&nbsp; [Python API](#python-api) &nbsp;&bull;&nbsp; [Architecture](#architecture) &nbsp;&bull;&nbsp; [Contributing](#contributing) &nbsp;&bull;&nbsp; [hjlabs.in](https://hjlabs.in)
+
+<br />
+
 </div>
 
 ---
 
-# TradingAgents: Multi-Agents LLM Financial Trading Framework
+## Highlights
 
-## News
-- [2026-02] **TradingAgents v0.2.0** released with multi-provider LLM support (GPT-5.x, Gemini 3.x, Claude 4.x, Grok 4.x) and improved system architecture.
-- [2026-01] **Trading-R1** [Technical Report](https://arxiv.org/abs/2509.11420) released, with [Terminal](https://github.com/TauricResearch/Trading-R1) expected to land soon.
+<table>
+<tr>
+<td width="50%">
 
-<div align="center">
-<a href="https://www.star-history.com/#TauricResearch/TradingAgents&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date" />
-   <img alt="TradingAgents Star History" src="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date" style="width: 80%; height: auto;" />
- </picture>
-</a>
-</div>
+**Multi-Agent Collaboration** &mdash; Specialized AI agents (Technical, Fundamental, Sentiment, Risk) work together, each bringing domain expertise to stock analysis.
 
-> 🎉 **TradingAgents** officially released! We have received numerous inquiries about the work, and we would like to express our thanks for the enthusiasm in our community.
->
-> So we decided to fully open-source the framework. Looking forward to building impactful projects with you!
+**Structured Debate System** &mdash; Bull and bear researchers debate findings, challenge assumptions, and reach consensus through reasoned discussion.
 
-<div align="center">
+</td>
+<td width="50%">
 
-🚀 [TradingAgents](#tradingagents-framework) | ⚡ [Installation & CLI](#installation-and-cli) | 🎬 [Demo](https://www.youtube.com/watch?v=90gr5lwjIho) | 📦 [Package Usage](#tradingagents-package) | 🤝 [Contributing](#contributing) | 📄 [Citation](#citation)
+**Real-Time Web Dashboard** &mdash; Production-grade React frontend with live analysis pipeline visualization, backtesting, and portfolio simulation.
 
-</div>
+**Configurable & Extensible** &mdash; Swap LLM providers (OpenAI, Anthropic Claude), adjust debate rounds, configure data sources, and extend with custom agents.
 
-## TradingAgents Framework
+</td>
+</tr>
+</table>
 
-TradingAgents is a multi-agent trading framework that mirrors the dynamics of real-world trading firms. By deploying specialized LLM-powered agents: from fundamental analysts, sentiment experts, and technical analysts, to trader, risk management team, the platform collaboratively evaluates market conditions and informs trading decisions. Moreover, these agents engage in dynamic discussions to pinpoint the optimal strategy.
+---
 
+## Screenshots
+
+<details open>
+<summary><b>Dashboard &mdash; AI Recommendations at a Glance</b></summary>
+<br />
 <p align="center">
-  <img src="assets/schema.png" style="width: 100%; height: auto;">
+  <img src="frontend/docs/screenshots/01-dashboard.png" width="100%" alt="TradingAgents Dashboard showing all 50 Nifty stocks with AI-powered BUY, SELL, HOLD recommendations, rank badges, confidence levels, and decision filters" />
 </p>
+</details>
 
-> TradingAgents framework is designed for research purposes. Trading performance may vary based on many factors, including the chosen backbone language models, model temperature, trading periods, the quality of data, and other non-deterministic factors. [It is not intended as financial, investment, or trading advice.](https://tauric.ai/disclaimer/)
-
-Our framework decomposes complex trading tasks into specialized roles. This ensures the system achieves a robust, scalable approach to market analysis and decision-making.
-
-### Analyst Team
-- Fundamentals Analyst: Evaluates company financials and performance metrics, identifying intrinsic values and potential red flags.
-- Sentiment Analyst: Analyzes social media and public sentiment using sentiment scoring algorithms to gauge short-term market mood.
-- News Analyst: Monitors global news and macroeconomic indicators, interpreting the impact of events on market conditions.
-- Technical Analyst: Utilizes technical indicators (like MACD and RSI) to detect trading patterns and forecast price movements.
-
+<details>
+<summary><b>History &mdash; Backtesting & Portfolio Simulation</b></summary>
+<br />
 <p align="center">
-  <img src="assets/analyst.png" width="100%" style="display: inline-block; margin: 0 2%;">
+  <img src="frontend/docs/screenshots/10-history-page.png" width="100%" alt="Historical backtesting page with prediction accuracy tracking, Sharpe ratio, max drawdown, win rate, portfolio simulator with Zerodha brokerage, and AI vs Nifty50 index comparison chart" />
 </p>
+</details>
 
-### Researcher Team
-- Comprises both bullish and bearish researchers who critically assess the insights provided by the Analyst Team. Through structured debates, they balance potential gains against inherent risks.
-
+<details>
+<summary><b>Stock Detail &mdash; Deep Analysis View</b></summary>
+<br />
 <p align="center">
-  <img src="assets/researcher.png" width="70%" style="display: inline-block; margin: 0 2%;">
+  <img src="frontend/docs/screenshots/03-stock-detail-overview.png" width="100%" alt="Individual stock analysis page showing AI recommendation with confidence level, risk assessment, recommendation history timeline, and detailed analysis summary" />
 </p>
+</details>
 
-### Trader Agent
-- Composes reports from the analysts and researchers to make informed trading decisions. It determines the timing and magnitude of trades based on comprehensive market insights.
-
+<details>
+<summary><b>Analysis Pipeline &mdash; 12-Step AI Decision Process</b></summary>
+<br />
 <p align="center">
-  <img src="assets/trader.png" width="70%" style="display: inline-block; margin: 0 2%;">
+  <img src="frontend/docs/screenshots/04-analysis-pipeline.png" width="100%" alt="12-step analysis pipeline visualization showing data collection, technical analysis, fundamental analysis, sentiment analysis, bull vs bear debate, and final trading decision" />
 </p>
+</details>
 
-### Risk Management and Portfolio Manager
-- Continuously evaluates portfolio risk by assessing market volatility, liquidity, and other risk factors. The risk management team evaluates and adjusts trading strategies, providing assessment reports to the Portfolio Manager for final decision.
-- The Portfolio Manager approves/rejects the transaction proposal. If approved, the order will be sent to the simulated exchange and executed.
-
+<details>
+<summary><b>Investment Debates &mdash; Bull vs Bear AI Agents</b></summary>
+<br />
 <p align="center">
-  <img src="assets/risk.png" width="70%" style="display: inline-block; margin: 0 2%;">
+  <img src="frontend/docs/screenshots/05-debates-tab.png" width="100%" alt="AI-powered investment debate between bull and bear researcher agents with research manager synthesis and final judgment" />
 </p>
+</details>
 
-## Installation and CLI
+<details>
+<summary><b>Historical Date View &mdash; Ranked Stock Lists</b></summary>
+<br />
+<p align="center">
+  <img src="frontend/docs/screenshots/11-history-stocks-expanded.png" width="100%" alt="History page with date cards showing buy/sell/hold breakdown, return percentages, and expanded ranked stock list with hold periods" />
+</p>
+</details>
+
+<details>
+<summary><b>How It Works &mdash; Multi-Agent AI System</b></summary>
+<br />
+<p align="center">
+  <img src="frontend/docs/screenshots/09-how-it-works.png" width="100%" alt="Educational page explaining the multi-agent AI system architecture with agent role cards and structured debate process flow" />
+</p>
+</details>
+
+<details>
+<summary><b>Settings &mdash; Configurable AI Models</b></summary>
+<br />
+<p align="center">
+  <img src="frontend/docs/screenshots/02-settings-modal.png" width="60%" alt="Settings panel for configuring LLM provider selection between Claude and OpenAI, model tier selection, API key management, and debate round configuration" />
+</p>
+</details>
+
+<details>
+<summary><b>Dark Mode</b></summary>
+<br />
+<p align="center">
+  <img src="frontend/docs/screenshots/08-dashboard-dark-mode.png" width="100%" alt="Dashboard in dark mode with glassmorphic card design, premium styling, and automatic system theme detection" />
+</p>
+</details>
+
+---
+
+## Architecture
+
+TradingAgents mirrors the structure of real-world trading firms by decomposing complex trading tasks into specialized roles:
+
+```
+                    +-------------------------------------+
+                    |         Data Collection              |
+                    |  (Market, News, Social, Financials)  |
+                    +-----------------+-------------------+
+                                      |
+                    +-----------------v-------------------+
+                    |          Analyst Team                |
+                    |  Technical | Fundamental | Sentiment |
+                    |            |  News       |           |
+                    +-----------------+-------------------+
+                                      |
+                    +-----------------v-------------------+
+                    |        Researcher Team               |
+                    |    Bull Researcher vs Bear Researcher |
+                    |      (Structured AI Debate)          |
+                    +-----------------+-------------------+
+                                      |
+                    +-----------------v-------------------+
+                    |         Trader Agent                 |
+                    |   Synthesizes reports -> Decision    |
+                    +-----------------+-------------------+
+                                      |
+                    +-----------------v-------------------+
+                    |    Risk Management & Portfolio Mgr   |
+                    |  Evaluates risk -> Approves/Rejects  |
+                    +-------------------------------------+
+```
+
+<details>
+<summary><b>Agent Details</b></summary>
+
+| Agent | Role | Key Capabilities |
+|-------|------|------------------|
+| **Technical Analyst** | Chart & indicator analysis | RSI, MACD, Bollinger Bands, moving averages, volume patterns |
+| **Fundamental Analyst** | Financial evaluation | P/E ratios, earnings, debt analysis, intrinsic value |
+| **Sentiment Analyst** | Market mood assessment | Social media trends, analyst ratings, market psychology |
+| **News Analyst** | Event impact analysis | Macro indicators, breaking news, sector developments |
+| **Bull Researcher** | Bullish case builder | Identifies growth catalysts, upside potential |
+| **Bear Researcher** | Risk challenger | Highlights risks, valuation concerns, downside scenarios |
+| **Trader Agent** | Decision synthesis | Combines all reports into actionable BUY/SELL/HOLD |
+| **Risk Manager** | Portfolio protection | Volatility assessment, position sizing, drawdown limits |
+
+</details>
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.13+
+- Node.js 18+ (for web dashboard)
+- API keys: OpenAI or Anthropic Claude, [Alpha Vantage](https://www.alphavantage.co/support/#api-key) (free)
 
 ### Installation
 
-Clone TradingAgents:
 ```bash
-git clone https://github.com/TauricResearch/TradingAgents.git
+# Clone the repository
+git clone https://github.com/hemangjoshi37a/TradingAgents.git
 cd TradingAgents
-```
 
-Create a virtual environment in any of your favorite environment managers:
-```bash
+# Create virtual environment
 conda create -n tradingagents python=3.13
 conda activate tradingagents
-```
 
-Install dependencies:
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### Required APIs
-
-TradingAgents supports multiple LLM providers. Set the API key for your chosen provider:
+### API Keys
 
 ```bash
-export OPENAI_API_KEY=...          # OpenAI (GPT)
-export GOOGLE_API_KEY=...          # Google (Gemini)
-export ANTHROPIC_API_KEY=...       # Anthropic (Claude)
-export XAI_API_KEY=...             # xAI (Grok)
-export OPENROUTER_API_KEY=...      # OpenRouter
-export ALPHA_VANTAGE_API_KEY=...   # Alpha Vantage
+export OPENAI_API_KEY=your_openai_key
+export ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
 ```
 
-For local models, configure Ollama with `llm_provider: "ollama"` in your config.
-
-Alternatively, copy `.env.example` to `.env` and fill in your keys:
+Or create a `.env` file from the template:
 ```bash
 cp .env.example .env
 ```
 
+> **Note:** Alpha Vantage provides a free API key with 60 requests/minute for TradingAgents-sourced requests. For offline experimentation, a local data vendor option is also available.
+
 ### CLI Usage
 
-You can also try out the CLI directly by running:
 ```bash
 python -m cli.main
 ```
-You will see a screen where you can select your desired tickers, date, LLMs, research depth, etc.
+
+Select your tickers, date, LLMs, and research depth from the interactive interface.
 
 <p align="center">
-  <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block; margin: 0 2%;">
+  <img src="assets/cli/cli_init.png" width="100%" alt="TradingAgents CLI interface showing ticker selection, date picker, and LLM configuration" />
 </p>
 
-An interface will appear showing results as they load, letting you track the agent's progress as it runs.
+---
 
-<p align="center">
-  <img src="assets/cli/cli_news.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
+## Nifty50 AI Web Dashboard
 
-<p align="center">
-  <img src="assets/cli/cli_transaction.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
+A production-grade web dashboard built for **Indian Nifty 50 stocks** with full transparency into the multi-agent decision process.
 
-## TradingAgents Package
+### Quick Start
 
-### Implementation Details
+```bash
+# Terminal 1: Start the backend
+cd frontend/backend
+pip install -r requirements.txt
+python server.py  # http://localhost:8001
 
-We built TradingAgents with LangGraph to ensure flexibility and modularity. The framework supports multiple LLM providers: OpenAI, Google, Anthropic, xAI, OpenRouter, and Ollama.
+# Terminal 2: Start the frontend
+cd frontend
+npm install
+npm run dev  # http://localhost:5173
+```
 
-### Python Usage
+### Features
 
-To use TradingAgents inside your code, you can import the `tradingagents` module and initialize a `TradingAgentsGraph()` object. The `.propagate()` function will return a decision. You can run `main.py`, here's also a quick example:
+| Feature | Description |
+|---------|-------------|
+| **AI Recommendations** | BUY/SELL/HOLD decisions for all 50 Nifty stocks with confidence levels and risk ratings |
+| **Stock Ranking (1-50)** | Composite scoring algorithm ranks stocks from best to worst investment opportunity |
+| **Analysis Pipeline** | 12-step visualization showing data collection, agent analysis, debate, and decision |
+| **Investment Debates** | Full bull vs bear debate transcripts with research manager synthesis |
+| **Backtesting** | Prediction accuracy tracking, risk metrics (Sharpe, drawdown), win/loss ratios, date backtest runner with cancel support |
+| **Portfolio Simulator** | Paper trading simulation with Zerodha-accurate brokerage charges and Nifty50 benchmarking |
+| **Settings Panel** | Configure LLM provider (Claude/OpenAI), model tiers, debate rounds, parallel workers |
+| **Dark Mode** | Automatic system theme detection with manual toggle |
+
+### Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18 + TypeScript, Vite, Tailwind CSS 4 |
+| Charts | Recharts |
+| Icons | Lucide React |
+| Backend | FastAPI (Python) |
+| Database | SQLite |
+| Fonts | DM Sans + Plus Jakarta Sans |
+
+### Project Structure
+
+```
+frontend/
+├── src/
+│   ├── components/          # Reusable UI components
+│   │   ├── pipeline/        # Analysis pipeline visualization
+│   │   ├── StockCard.tsx    # Stock cards with rank badges
+│   │   ├── TopPicks.tsx     # Top picks & stocks to avoid
+│   │   └── Header.tsx       # Navigation header
+│   ├── contexts/            # React contexts (Settings, Theme)
+│   ├── pages/
+│   │   ├── Dashboard.tsx    # Main stock grid with filters
+│   │   ├── StockDetail.tsx  # Individual stock analysis
+│   │   ├── History.tsx      # Backtesting & portfolio sim
+│   │   └── About.tsx        # How it works
+│   ├── services/api.ts      # API client
+│   └── types/index.ts       # TypeScript type definitions
+├── backend/
+│   ├── server.py            # FastAPI server
+│   ├── database.py          # SQLite operations & ranking
+│   └── backtest_service.py  # Backtesting engine
+└── docs/screenshots/        # Documentation screenshots
+```
+
+---
+
+## Python API
+
+Use TradingAgents programmatically in your own projects:
 
 ```python
 from tradingagents.graph.trading_graph import TradingAgentsGraph
@@ -174,46 +313,83 @@ from tradingagents.default_config import DEFAULT_CONFIG
 
 ta = TradingAgentsGraph(debug=True, config=DEFAULT_CONFIG.copy())
 
-# forward propagate
-_, decision = ta.propagate("NVDA", "2026-01-15")
+# Analyze a stock
+_, decision = ta.propagate("NVDA", "2024-05-10")
 print(decision)
 ```
 
-You can also adjust the default configuration to set your own choice of LLMs, debate rounds, etc.
+### Custom Configuration
 
 ```python
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 
 config = DEFAULT_CONFIG.copy()
-config["llm_provider"] = "openai"        # openai, google, anthropic, xai, openrouter, ollama
-config["deep_think_llm"] = "gpt-5.2"     # Model for complex reasoning
-config["quick_think_llm"] = "gpt-5-mini" # Model for quick tasks
-config["max_debate_rounds"] = 2
+config["deep_think_llm"] = "gpt-4.1-nano"
+config["quick_think_llm"] = "gpt-4.1-nano"
+config["max_debate_rounds"] = 3
+
+config["data_vendors"] = {
+    "core_stock_apis": "yfinance",
+    "technical_indicators": "yfinance",
+    "fundamental_data": "alpha_vantage",
+    "news_data": "alpha_vantage",
+}
 
 ta = TradingAgentsGraph(debug=True, config=config)
-_, decision = ta.propagate("NVDA", "2026-01-15")
-print(decision)
+_, decision = ta.propagate("NVDA", "2024-05-10")
 ```
 
-See `tradingagents/default_config.py` for all configuration options.
+See `tradingagents/default_config.py` for the full list of configuration options.
+
+---
 
 ## Contributing
 
-We welcome contributions from the community! Whether it's fixing a bug, improving documentation, or suggesting a new feature, your input helps make this project better. If you are interested in this line of research, please consider joining our open-source financial AI research community [Tauric Research](https://tauric.ai/).
+We welcome contributions! Whether it's fixing a bug, improving documentation, or suggesting a new feature &mdash; your input helps make this project better.
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/your-feature`)
+3. Commit your changes
+4. Push to the branch and open a Pull Request
+
+---
+
+## Disclaimer
+
+TradingAgents is designed for **research and educational purposes only**. Trading performance varies based on LLM selection, model temperature, data quality, and other non-deterministic factors. This software is **not financial, investment, or trading advice**. Always do your own research and consult a qualified financial advisor.
+
+---
 
 ## Citation
 
-Please reference our work if you find *TradingAgents* provides you with some help :)
+If you find TradingAgents useful in your research, please cite:
 
-```
+```bibtex
 @misc{xiao2025tradingagentsmultiagentsllmfinancial,
-      title={TradingAgents: Multi-Agents LLM Financial Trading Framework}, 
+      title={TradingAgents: Multi-Agents LLM Financial Trading Framework},
       author={Yijia Xiao and Edward Sun and Di Luo and Wei Wang},
       year={2025},
       eprint={2412.20138},
       archivePrefix={arXiv},
       primaryClass={q-fin.TR},
-      url={https://arxiv.org/abs/2412.20138}, 
+      url={https://arxiv.org/abs/2412.20138},
 }
 ```
+
+---
+
+<div align="center">
+
+### Built and maintained by **[hjlabs.in](https://hjlabs.in)**
+
+[![Website](https://img.shields.io/badge/hjlabs.in-Visit_Website-FF6B6B?style=for-the-badge&logo=googlechrome&logoColor=white)](https://hjlabs.in)
+[![GitHub](https://img.shields.io/badge/GitHub-hemangjoshi37a-181717?style=for-the-badge&logo=github)](https://github.com/hemangjoshi37a)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-hemang--joshi-0A66C2?style=for-the-badge&logo=linkedin)](https://www.linkedin.com/in/hemang-joshi/)
+[![YouTube](https://img.shields.io/badge/YouTube-hjlabs-FF0000?style=for-the-badge&logo=youtube)](https://www.youtube.com/@hjlabs)
+
+<sub>Made with AI agents that actually debate before deciding.</sub>
+
+If you find this project useful, please consider giving it a star on GitHub!
+
+</div>
