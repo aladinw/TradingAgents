@@ -2,7 +2,7 @@ from typing import Annotated, Union
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from .googlenews_utils import getNewsData, getGlobalNewsData
-from .markets import is_nifty_50_stock, get_nifty_50_company_name
+from .markets import is_sp500_top50_stock, get_sp500_top50_company_name
 
 
 def get_google_news(
@@ -36,14 +36,12 @@ def get_google_news(
             # If parsing fails, default to 7 days
             look_back_days = 7
 
-    # For NSE stocks, enhance query with company name for better news results
+    # Enhance query with company name for better news results
     original_query = query
-    if is_nifty_50_stock(query):
-        company_name = get_nifty_50_company_name(query)
+    if is_sp500_top50_stock(query):
+        company_name = get_sp500_top50_company_name(query)
         if company_name:
-            # Use company name for better news search results
-            # Add "NSE" and "stock" to filter for relevant financial news
-            query = f"{company_name} NSE stock"
+            query = f"{company_name} NYSE NASDAQ stock"
 
     query = query.replace(" ", "+")
 
@@ -64,7 +62,7 @@ def get_google_news(
         return ""
 
     # Use original query (symbol) in the header for clarity
-    display_query = original_query if is_nifty_50_stock(original_query) else query.replace("+", " ")
+    display_query = original_query if is_sp500_top50_stock(original_query) else query.replace("+", " ")
     return f"## {display_query} Google News, from {before} to {curr_date}:\n\n{news_str}"
 
 

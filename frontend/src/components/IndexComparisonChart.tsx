@@ -22,7 +22,7 @@ export default function IndexComparisonChart({ height = 220, className = '', dat
   // Format dates for display
   const formattedData = data.map(d => ({
     ...d,
-    displayDate: new Date(d.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
+    displayDate: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
   }));
 
   const lastPoint = formattedData[formattedData.length - 1];
@@ -42,7 +42,7 @@ export default function IndexComparisonChart({ height = 220, className = '', dat
             <TrendingDown className="w-5 h-5 text-red-500" />
           )}
           <span className="text-sm text-gray-600 dark:text-gray-400">
-            AI Strategy {isOutperforming ? 'outperformed' : 'underperformed'} Nifty50 by{' '}
+            AI Strategy {isOutperforming ? 'outperformed' : 'underperformed'} S&P 500 by{' '}
             <span className={`font-bold ${isOutperforming ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
               {Math.abs(outperformance).toFixed(1)}%
             </span>
@@ -55,7 +55,7 @@ export default function IndexComparisonChart({ height = 220, className = '', dat
           </div>
           <div className="flex items-center gap-1">
             <div className="w-3 h-0.5 bg-amber-500 rounded" />
-            <span className="text-gray-500 dark:text-gray-400">Nifty: {indexReturn >= 0 ? '+' : ''}{indexReturn.toFixed(1)}%</span>
+            <span className="text-gray-500 dark:text-gray-400">S&P 500: {indexReturn >= 0 ? '+' : ''}{indexReturn.toFixed(1)}%</span>
           </div>
         </div>
       </div>
@@ -87,7 +87,7 @@ export default function IndexComparisonChart({ height = 220, className = '', dat
             />
             <Legend
               wrapperStyle={{ fontSize: '11px' }}
-              formatter={(value) => value === 'aiReturn' ? 'AI Strategy' : 'Nifty50 Index'}
+              formatter={(value) => value === 'aiReturn' ? 'AI Strategy' : 'S&P 500 Index'}
             />
             <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
             <Line

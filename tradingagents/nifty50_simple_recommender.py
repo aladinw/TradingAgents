@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
 
-from tradingagents.dataflows.markets import NIFTY_50_STOCKS, get_nifty_50_list
+from tradingagents.dataflows.markets import SP500_TOP_50_STOCKS, get_sp500_top50_list
 from tradingagents.claude_max_llm import ClaudeMaxLLM
 
 # Import data fetching tools
@@ -76,7 +76,7 @@ def fetch_stock_data(symbol: str, trade_date: str) -> Dict[str, str]:
 
     # Fetch news
     try:
-        company_name = NIFTY_50_STOCKS.get(symbol, symbol)
+        company_name = SP500_TOP_50_STOCKS.get(symbol, symbol)
         data["news"] = get_news.invoke({
             "symbol": symbol,
             "company_name": company_name
@@ -99,7 +99,7 @@ def analyze_stock(symbol: str, data: Dict[str, str], llm: ClaudeMaxLLM) -> Dict[
     Returns:
         Analysis result with decision and reasoning
     """
-    company_name = NIFTY_50_STOCKS.get(symbol, symbol)
+    company_name = SP500_TOP_50_STOCKS.get(symbol, symbol)
 
     prompt = f"""You are an expert stock analyst. Analyze the following data for {symbol} ({company_name}) and provide:
 1. A trading decision: BUY, SELL, or HOLD
@@ -188,7 +188,7 @@ def analyze_all_stocks(
     # Initialize Claude LLM
     llm = ClaudeMaxLLM(model="sonnet")
 
-    stocks = stock_subset if stock_subset else get_nifty_50_list()
+    stocks = stock_subset if stock_subset else get_sp500_top50_list()
     total = len(stocks)
     results = {}
 
@@ -305,7 +305,7 @@ def run_recommendation(
         print("NIFTY 50 STOCK RECOMMENDATION SYSTEM (Simple)")
         print(f"{'='*60}")
         print(f"Date: {trade_date}")
-        stocks = stock_subset if stock_subset else get_nifty_50_list()
+        stocks = stock_subset if stock_subset else get_sp500_top50_list()
         print(f"Analyzing {len(stocks)} stocks...")
         print(f"Using Claude Max subscription via CLI")
         print(f"{'='*60}\n")

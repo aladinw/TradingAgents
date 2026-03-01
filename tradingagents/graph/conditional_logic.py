@@ -60,8 +60,10 @@ class ConditionalLogic:
             state["risk_debate_state"]["count"] >= 3 * self.max_risk_discuss_rounds
         ):  # 3 rounds of back-and-forth between 3 agents
             return "Risk Judge"
-        if state["risk_debate_state"]["latest_speaker"].startswith("Aggressive"):
+        # Debator agents set latest_speaker to: "Risky", "Safe", "Neutral"
+        speaker = state["risk_debate_state"]["latest_speaker"]
+        if speaker.startswith("Risky"):
             return "Conservative Analyst"
-        if state["risk_debate_state"]["latest_speaker"].startswith("Conservative"):
+        if speaker.startswith("Safe"):
             return "Neutral Analyst"
         return "Aggressive Analyst"

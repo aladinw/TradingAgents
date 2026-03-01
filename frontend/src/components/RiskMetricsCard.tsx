@@ -202,8 +202,8 @@ export default function RiskMetricsCard({ className = '', metrics: propMetrics }
               <div>
                 <p className="font-medium text-gray-900 dark:text-gray-100 mb-2">Your Values:</p>
                 <div className="text-xs space-y-1 mb-3">
-                  <p>• Peak Value (Vpeak) = <span className="text-green-600 dark:text-green-400 font-medium">₹{metrics.peakValue.toFixed(2)}</span> <span className="text-gray-400">(normalized from ₹100)</span></p>
-                  <p>• Trough Value (Vtrough) = <span className="text-red-600 dark:text-red-400 font-medium">₹{metrics.troughValue.toFixed(2)}</span></p>
+                  <p>• Peak Value (Vpeak) = <span className="text-green-600 dark:text-green-400 font-medium">${metrics.peakValue.toFixed(2)}</span> <span className="text-gray-400">(normalized from $100)</span></p>
+                  <p>• Trough Value (Vtrough) = <span className="text-red-600 dark:text-red-400 font-medium">${metrics.troughValue.toFixed(2)}</span></p>
                 </div>
 
                 <p className="font-medium text-gray-900 dark:text-gray-100 mb-2">Calculation:</p>

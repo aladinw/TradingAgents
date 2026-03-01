@@ -90,10 +90,10 @@ const DEFAULT_SETTINGS: Settings = {
   parallelWorkers: 3,
   autoAnalyzeEnabled: false,
   autoAnalyzeTime: '09:00',
-  autoAnalyzeTimezone: 'Asia/Kolkata',
+  autoAnalyzeTimezone: 'America/New_York',
 };
 
-const STORAGE_KEY = 'nifty50ai_settings';
+const STORAGE_KEY = 'usstocksai_settings';
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 

@@ -8,8 +8,8 @@ import HowItWorks from '../components/HowItWorks';
 import { api } from '../services/api';
 import { useSettings } from '../contexts/SettingsContext';
 import { useNotification } from '../contexts/NotificationContext';
-import { NIFTY_50_STOCKS } from '../types';
-import type { Decision, StockAnalysis, DailyRecommendation, NiftyStock } from '../types';
+import { SP500_TOP_50_STOCKS } from '../types';
+import type { Decision, StockAnalysis, DailyRecommendation, SP500Stock } from '../types';
 
 type FilterType = 'ALL' | Decision;
 
@@ -275,8 +275,8 @@ export default function Dashboard() {
     const currentSymbols = new Set(analysisProgress.current_symbols || []);
     const analysisMap = recommendation?.analysis || {};
 
-    return NIFTY_50_STOCKS.map((niftyStock: NiftyStock): StockGridItem => {
-      const { symbol } = niftyStock;
+    return SP500_TOP_50_STOCKS.map((stock: SP500Stock): StockGridItem => {
+      const { symbol } = stock;
       const resultStatus = analysisResults[symbol];
       const existingAnalysis = analysisMap[symbol] || null;
 
@@ -401,11 +401,11 @@ export default function Dashboard() {
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-display font-bold text-gray-900 dark:text-gray-100 tracking-tight">
-              Nifty 50 <span className="gradient-text">AI Recommendations</span>
+              S&P 500 Top 50 <span className="gradient-text">AI Recommendations</span>
             </h1>
             <div className="flex items-center gap-2 mt-1.5 text-sm text-gray-500 dark:text-gray-400">
               <Calendar className="w-3.5 h-3.5" />
-              <span>{new Date(recommendation.date).toLocaleDateString('en-IN', {
+              <span>{new Date(recommendation.date).toLocaleDateString('en-US', {
                 weekday: 'short',
                 month: 'short',
                 day: 'numeric',

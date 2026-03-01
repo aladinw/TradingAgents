@@ -57,7 +57,7 @@ from .alpha_vantage import (
 )
 from .alpha_vantage_common import AlphaVantageRateLimitError
 from .jugaad_data import get_jugaad_stock_data, get_jugaad_indicators
-from .markets import detect_market, Market, is_nifty_50_stock
+from .markets import detect_market, Market
 
 # Configuration and routing logic
 from .config import get_config
@@ -209,7 +209,6 @@ def get_category_for_method(method: str) -> str:
 def get_vendor(category: str, method: str = None, symbol: str = None) -> str:
     """Get the configured vendor for a data category or specific tool method.
     Tool-level configuration takes precedence over category-level.
-    For NSE stocks, automatically routes to jugaad_data for core_stock_apis and technical_indicators.
 
     Args:
         category: Data category (e.g., "core_stock_apis", "technical_indicators")
@@ -226,23 +225,6 @@ def get_vendor(category: str, method: str = None, symbol: str = None) -> str:
         tool_vendors = config.get("tool_vendors", {})
         if method in tool_vendors:
             return tool_vendors[method]
-
-    # Market-aware vendor routing for NSE stocks
-    if symbol:
-        market_config = config.get("market", "auto")
-        market = detect_market(symbol, market_config)
-
-        if market == Market.INDIA_NSE:
-            # Use yfinance as primary for NSE stocks (more reliable than jugaad_data from outside India)
-            # jugaad_data requires direct NSE access which may be blocked/slow
-            if category in ("core_stock_apis", "technical_indicators"):
-                return "yfinance"  # yfinance handles .NS suffix automatically
-            # Use yfinance for fundamentals (with .NS suffix handled in y_finance.py)
-            elif category == "fundamental_data":
-                return "yfinance"
-            # Use google for news (handled in google.py with company name enhancement)
-            elif category == "news_data":
-                return "google"
 
     # Fall back to category-level configuration
     return config.get("data_vendors", {}).get(category, "default")

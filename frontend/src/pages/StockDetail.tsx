@@ -5,7 +5,7 @@ import {
   Calendar, Activity, LineChart, Database, MessageSquare, Layers,
   RefreshCw, Play, Loader2, CheckCircle, XCircle, Target, BarChart3, Square
 } from 'lucide-react';
-import { NIFTY_50_STOCKS } from '../types';
+import { SP500_TOP_50_STOCKS } from '../types';
 import type { DailyRecommendation, StockAnalysis } from '../types';
 import { DecisionBadge, ConfidenceBadge, RiskBadge, HoldDaysBadge, RankBadge } from '../components/StockCard';
 import AIAnalysisPanel from '../components/AIAnalysisPanel';
@@ -63,7 +63,7 @@ export default function StockDetail() {
   const [analysisProgress, setAnalysisProgress] = useState<string | null>(null);
   const [analysisSteps, setAnalysisSteps] = useState<{ completed: number; total: number } | null>(null);
 
-  const stock = NIFTY_50_STOCKS.find(s => s.symbol === symbol);
+  const stock = SP500_TOP_50_STOCKS.find(s => s.symbol === symbol);
 
   // API-first loading for recommendation data
   const [latestRecommendation, setLatestRecommendation] = useState<DailyRecommendation | null>(null);
@@ -527,7 +527,7 @@ export default function StockDetail() {
         <div className="text-center">
           <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-2">Stock Not Found</h2>
-          <p className="text-gray-500 dark:text-gray-400 mb-4">The stock "{symbol}" was not found in Nifty 50.</p>
+          <p className="text-gray-500 dark:text-gray-400 mb-4">The stock "{symbol}" was not found in S&P 500 Top 50.</p>
           <Link to="/" className="btn-primary">
             Back to Dashboard
           </Link>
@@ -599,7 +599,7 @@ export default function StockDetail() {
               </div>
               <div className="flex items-center gap-1.5 text-white/70 mt-1">
                 <Calendar className="w-3 h-3" />
-                {latestRecommendation?.date ? new Date(latestRecommendation.date).toLocaleDateString('en-IN', {
+                {latestRecommendation?.date ? new Date(latestRecommendation.date).toLocaleDateString('en-US', {
                   month: 'short',
                   day: 'numeric',
                 }) : 'N/A'}
@@ -945,13 +945,13 @@ export default function StockDetail() {
                     {/* Date */}
                     <div className="w-16 flex-shrink-0">
                       <div className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                        {new Date(entry.date).toLocaleDateString('en-IN', {
+                        {new Date(entry.date).toLocaleDateString('en-US', {
                           day: 'numeric',
                           month: 'short',
                         })}
                       </div>
                       <div className="text-[10px] text-gray-400 dark:text-gray-500">
-                        {new Date(entry.date).toLocaleDateString('en-IN', { weekday: 'short' })}
+                        {new Date(entry.date).toLocaleDateString('en-US', { weekday: 'short' })}
                       </div>
                     </div>
 

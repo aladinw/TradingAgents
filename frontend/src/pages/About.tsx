@@ -87,7 +87,7 @@ export default function About() {
             </div>
             <div>
               <h1 className="text-2xl font-display font-bold">How TradingAgents Works</h1>
-              <p className="text-white/80 text-sm">AI-powered stock analysis for Nifty 50</p>
+              <p className="text-white/80 text-sm">AI-powered stock analysis for S&P 500 Top 50</p>
             </div>
           </div>
           <p className="text-white/90 text-sm leading-relaxed max-w-2xl">
@@ -222,7 +222,7 @@ export default function About() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
           <div className="p-2 rounded-lg bg-gray-50 dark:bg-slate-700">
             <span className="text-gray-500 dark:text-gray-400">Price Data:</span>
-            <span className="ml-1 text-gray-900 dark:text-gray-100">NSE/BSE</span>
+            <span className="ml-1 text-gray-900 dark:text-gray-100">NYSE/NASDAQ</span>
           </div>
           <div className="p-2 rounded-lg bg-gray-50 dark:bg-slate-700">
             <span className="text-gray-500 dark:text-gray-400">Financials:</span>

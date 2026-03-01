@@ -72,7 +72,7 @@ interface HistoricalChartProps {
 export function HistoricalBarChart({ data }: HistoricalChartProps) {
   const formattedData = data.map(d => ({
     ...d,
-    date: new Date(d.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
+    date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
   }));
 
   return (
@@ -141,7 +141,7 @@ export function StockHistoryTimeline({ history, symbol }: StockHistoryChartProps
         return (
           <div key={idx} className="flex items-center gap-4">
             <div className="w-24 text-sm text-gray-500">
-              {new Date(entry.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
+              {new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             </div>
             <div className={`w-3 h-3 rounded-full ${bgColor}`} />
             <div className={`text-sm font-medium ${textColor}`}>

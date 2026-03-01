@@ -18,7 +18,7 @@ from datetime import datetime
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.dataflows.markets import NIFTY_50_STOCKS, get_nifty_50_list
+from tradingagents.dataflows.markets import SP500_TOP_50_STOCKS, get_sp500_top50_list
 from tradingagents.claude_max_llm import ClaudeMaxLLM
 
 
@@ -101,7 +101,7 @@ def predict_stock(
 
         return {
             "symbol": symbol,
-            "company_name": NIFTY_50_STOCKS.get(symbol, symbol),
+            "company_name": SP500_TOP_50_STOCKS.get(symbol, symbol),
             "decision": decision,
             "market_report": final_state.get("market_report", ""),
             "fundamentals_report": final_state.get("fundamentals_report", ""),
@@ -125,7 +125,7 @@ def predict_stock(
     except Exception as e:
         return {
             "symbol": symbol,
-            "company_name": NIFTY_50_STOCKS.get(symbol, symbol),
+            "company_name": SP500_TOP_50_STOCKS.get(symbol, symbol),
             "decision": None,
             "error": str(e),
         }
@@ -163,7 +163,7 @@ def predict_all_nifty50(
     )
 
     # Get list of stocks to analyze
-    stocks = stock_subset if stock_subset else get_nifty_50_list()
+    stocks = stock_subset if stock_subset else get_sp500_top50_list()
     total = len(stocks)
 
     predictions = {}
@@ -379,7 +379,7 @@ def run_recommendation(
         print(f"NIFTY 50 STOCK RECOMMENDATION SYSTEM")
         print(f"{'='*60}")
         print(f"Date: {trade_date}")
-        stocks = stock_subset if stock_subset else get_nifty_50_list()
+        stocks = stock_subset if stock_subset else get_sp500_top50_list()
         print(f"Analyzing {len(stocks)} stocks...")
         print(f"{'='*60}\n")
 

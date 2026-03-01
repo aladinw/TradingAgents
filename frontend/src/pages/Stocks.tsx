@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Building2 } from 'lucide-react';
-import { NIFTY_50_STOCKS } from '../types';
+import { SP500_TOP_50_STOCKS } from '../types';
 import type { DailyRecommendation } from '../types';
 import { DecisionBadge, ConfidenceBadge } from '../components/StockCard';
 import { api } from '../services/api';
@@ -26,12 +26,12 @@ export default function Stocks() {
   }, []);
 
   const sectors = useMemo(() => {
-    const sectorSet = new Set(NIFTY_50_STOCKS.map(s => s.sector).filter(Boolean));
+    const sectorSet = new Set(SP500_TOP_50_STOCKS.map(s => s.sector).filter(Boolean));
     return ['ALL', ...Array.from(sectorSet).sort()];
   }, []);
 
   const filteredStocks = useMemo(() => {
-    return NIFTY_50_STOCKS.filter(stock => {
+    return SP500_TOP_50_STOCKS.filter(stock => {
       const matchesSearch =
         stock.symbol.toLowerCase().includes(search.toLowerCase()) ||
         stock.company_name.toLowerCase().includes(search.toLowerCase());
@@ -53,10 +53,10 @@ export default function Stocks() {
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-3">
           <div>
             <h1 className="text-xl font-display font-bold text-gray-900">
-              All <span className="gradient-text">Nifty 50 Stocks</span>
+              All <span className="gradient-text">S&P 500 Top 50 Stocks</span>
             </h1>
             <p className="text-sm text-gray-500">
-              {filteredStocks.length} of {NIFTY_50_STOCKS.length} stocks
+              {filteredStocks.length} of {SP500_TOP_50_STOCKS.length} stocks
             </p>
           </div>
         </div>

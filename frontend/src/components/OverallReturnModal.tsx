@@ -74,12 +74,12 @@ export default function OverallReturnModal({ isOpen, onClose, breakdown: propBre
             <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-2">Why Compound Returns?</h3>
             <div className="p-3 rounded-lg bg-gray-50 dark:bg-slate-700/50 text-sm space-y-2">
               <p className="text-gray-700 dark:text-gray-300">
-                In real trading, gains and losses <strong>compound</strong> over time. If you start with ₹10,000:
+                In real trading, gains and losses <strong>compound</strong> over time. If you start with $10,000:
               </p>
               <ul className="text-xs text-gray-600 dark:text-gray-400 ml-4 space-y-1">
-                <li>• Day 1: +2% → ₹10,000 × 1.02 = ₹10,200</li>
-                <li>• Day 2: +1% → ₹10,200 × 1.01 = ₹10,302</li>
-                <li>• Day 3: -1% → ₹10,302 × 0.99 = ₹10,199</li>
+                <li>• Day 1: +2% → $10,000 × 1.02 = $10,200</li>
+                <li>• Day 2: +1% → $10,200 × 1.01 = $10,302</li>
+                <li>• Day 3: -1% → $10,302 × 0.99 = $10,199</li>
               </ul>
               <p className="text-gray-700 dark:text-gray-300 mt-2">
                 Simple average would give (2+1-1)/3 = 0.67%, but actual return is +1.99%
@@ -119,7 +119,7 @@ export default function OverallReturnModal({ isOpen, onClose, breakdown: propBre
                   {breakdown.dailyReturns.map((day: { date: string; return: number; multiplier: number; cumulative: number }) => (
                     <tr key={day.date} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
                       <td className="px-2 sm:px-3 py-1.5 sm:py-2 text-gray-700 dark:text-gray-300">
-                        {new Date(day.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
+                        {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                       </td>
                       <td className={`px-2 sm:px-3 py-1.5 sm:py-2 text-right font-medium ${
                         day.return >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
@@ -163,7 +163,7 @@ export default function OverallReturnModal({ isOpen, onClose, breakdown: propBre
                 >
                   <div>
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {new Date(day.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
+                      {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-400 font-mono">
                       ×{day.multiplier.toFixed(4)}

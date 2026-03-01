@@ -1,14 +1,14 @@
 import { useState, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend, BarChart, Bar, Cell, LabelList } from 'recharts';
-import { Calculator, ChevronDown, ChevronUp, IndianRupee, Settings2, BarChart3, Info, TrendingUp, TrendingDown, ArrowRightLeft, Wallet, PiggyBank, Receipt, HelpCircle } from 'lucide-react';
-import { calculateBrokerage, formatINR, type BrokerageBreakdown } from '../utils/brokerageCalculator';
+import { Calculator, ChevronDown, ChevronUp, DollarSign, Settings2, BarChart3, Info, TrendingUp, TrendingDown, ArrowRightLeft, Wallet, PiggyBank, Receipt, HelpCircle } from 'lucide-react';
+import { calculateBrokerage, formatUSD, type BrokerageBreakdown } from '../utils/brokerageCalculator';
 import InfoModal, { InfoButton } from './InfoModal';
 import type { Decision, DailyRecommendation } from '../types';
 
 interface PortfolioSimulatorProps {
   className?: string;
   recommendations?: DailyRecommendation[];
-  nifty50Prices?: Record<string, number>;
+  sp500Prices?: Record<string, number>;
   allBacktestData?: Record<string, Record<string, number>>;
 }
 
@@ -33,25 +33,25 @@ interface TradeStats {
   trades: TradeRecord[];
 }
 
-// Smart trade counting logic using Zerodha brokerage for Equity Delivery
+// Smart trade counting logic using US commission-free brokerage for Equity Delivery
 function calculateSmartTrades(
   recommendations: DailyRecommendation[],
   mode: InvestmentMode,
   startingAmount: number,
-  nifty50Prices?: Record<string, number>,
+  sp500Prices?: Record<string, number>,
   allBacktestData?: Record<string, Record<string, number>>
 ): {
-  portfolioData: Array<{ date: string; rawDate: string; value: number; niftyValue: number; return: number; cumulative: number }>;
+  portfolioData: Array<{ date: string; rawDate: string; value: number; sp500Value: number; return: number; cumulative: number }>;
   stats: TradeStats;
   openPositions: Record<string, { entryDate: string; entryPrice: number; decision: Decision }>;
 } {
-  const hasRealNifty = nifty50Prices && Object.keys(nifty50Prices).length > 0;
+  const hasRealSP500 = sp500Prices && Object.keys(sp500Prices).length > 0;
   const sortedRecs = [...recommendations].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  // Precompute real Nifty start price for comparison
-  const sortedNiftyDates = hasRealNifty ? Object.keys(nifty50Prices).sort() : [];
-  const niftyStartPrice = hasRealNifty && sortedNiftyDates.length > 0
-    ? nifty50Prices[sortedNiftyDates[0]]
+  // Precompute real S&P 500 start price for comparison
+  const sortedSP500Dates = hasRealSP500 ? Object.keys(sp500Prices).sort() : [];
+  const sp500StartPrice = hasRealSP500 && sortedSP500Dates.length > 0
+    ? sp500Prices[sortedSP500Dates[0]]
     : null;
 
   // Track open positions per stock
@@ -71,7 +71,7 @@ function calculateSmartTrades(
   const investmentPerStock = startingAmount / stockCount;
 
   let portfolioValue = startingAmount;
-  let niftyValue = startingAmount;
+  let sp500Value = startingAmount;
 
   const portfolioData = sortedRecs.map((rec) => {
     const stocks = getStocksToTrack(rec);
@@ -150,19 +150,19 @@ function calculateSmartTrades(
     const avgDayReturn = stocksTracked > 0 ? dayReturn / stocksTracked : 0;
     portfolioValue = portfolioValue * (1 + avgDayReturn / 100);
 
-    // Use real Nifty50 prices if available, otherwise use mock history
-    if (hasRealNifty && niftyStartPrice) {
-      const closestDate = sortedNiftyDates.find(d => d >= rec.date) || sortedNiftyDates[sortedNiftyDates.length - 1];
-      if (closestDate && nifty50Prices[closestDate]) {
-        niftyValue = startingAmount * (nifty50Prices[closestDate] / niftyStartPrice);
+    // Use real S&P 500 prices if available, otherwise use mock history
+    if (hasRealSP500 && sp500StartPrice) {
+      const closestDate = sortedSP500Dates.find(d => d >= rec.date) || sortedSP500Dates[sortedSP500Dates.length - 1];
+      if (closestDate && sp500Prices[closestDate]) {
+        sp500Value = startingAmount * (sp500Prices[closestDate] / sp500StartPrice);
       }
     }
 
     return {
-      date: new Date(rec.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
+      date: new Date(rec.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       rawDate: rec.date,
       value: Math.round(portfolioValue),
-      niftyValue: Math.round(niftyValue),
+      sp500Value: Math.round(sp500Value),
       return: avgDayReturn,
       cumulative: ((portfolioValue - startingAmount) / startingAmount) * 100,
     };
@@ -171,16 +171,13 @@ function calculateSmartTrades(
   const totalBrokerage = completedTrades.reduce<BrokerageBreakdown>(
     (acc, trade) => ({
       brokerage: acc.brokerage + trade.brokerage.brokerage,
-      stt: acc.stt + trade.brokerage.stt,
-      exchangeCharges: acc.exchangeCharges + trade.brokerage.exchangeCharges,
-      sebiCharges: acc.sebiCharges + trade.brokerage.sebiCharges,
-      gst: acc.gst + trade.brokerage.gst,
-      stampDuty: acc.stampDuty + trade.brokerage.stampDuty,
+      secFee: acc.secFee + trade.brokerage.secFee,
+      tafFee: acc.tafFee + trade.brokerage.tafFee,
       totalCharges: acc.totalCharges + trade.brokerage.totalCharges,
       netProfit: acc.netProfit + trade.brokerage.netProfit,
       turnover: acc.turnover + trade.brokerage.turnover,
     }),
-    { brokerage: 0, stt: 0, exchangeCharges: 0, sebiCharges: 0, gst: 0, stampDuty: 0, totalCharges: 0, netProfit: 0, turnover: 0 }
+    { brokerage: 0, secFee: 0, tafFee: 0, totalCharges: 0, netProfit: 0, turnover: 0 }
   );
 
   return {
@@ -206,7 +203,7 @@ function getValueColorClass(value: number): string {
 export default function PortfolioSimulator({
   className = '',
   recommendations = [],
-  nifty50Prices,
+  sp500Prices,
   allBacktestData,
 }: PortfolioSimulatorProps) {
   const [startingAmount, setStartingAmount] = useState(100000);
@@ -226,14 +223,14 @@ export default function PortfolioSimulator({
       recommendations,
       investmentMode,
       startingAmount,
-      nifty50Prices,
+      sp500Prices,
       allBacktestData
     );
-  }, [recommendations, investmentMode, startingAmount, nifty50Prices, allBacktestData]);
+  }, [recommendations, investmentMode, startingAmount, sp500Prices, allBacktestData]);
 
   const lastDataPoint = portfolioData[portfolioData.length - 1];
   const currentValue = lastDataPoint?.value ?? startingAmount;
-  const niftyValue = lastDataPoint?.niftyValue ?? startingAmount;
+  const sp500Value = lastDataPoint?.sp500Value ?? startingAmount;
 
   const totalCharges = includeBrokerage ? stats.brokerageBreakdown.totalCharges : 0;
   const finalValue = currentValue - totalCharges;
@@ -241,14 +238,14 @@ export default function PortfolioSimulator({
   const profitLoss = finalValue - startingAmount;
   const isPositive = profitLoss >= 0;
 
-  const niftyReturn = ((niftyValue - startingAmount) / startingAmount) * 100;
-  const outperformance = totalReturn - niftyReturn;
+  const sp500Return = ((sp500Value - startingAmount) / startingAmount) * 100;
+  const outperformance = totalReturn - sp500Return;
 
   // Calculate Y-axis domain with padding
   const yAxisDomain = useMemo(() => {
     if (portfolioData.length === 0) return [0, startingAmount * 1.2];
 
-    const allValues = portfolioData.flatMap(d => [d.value, d.niftyValue]);
+    const allValues = portfolioData.flatMap(d => [d.value, d.sp500Value]);
     const minValue = Math.min(...allValues);
     const maxValue = Math.max(...allValues);
     const padding = (maxValue - minValue) * 0.1;
@@ -324,7 +321,7 @@ export default function PortfolioSimulator({
                 onChange={(e) => setIncludeBrokerage(e.target.checked)}
                 className="w-4 h-4 rounded border-gray-300 text-nifty-600 focus:ring-nifty-500"
               />
-              <span className="text-xs text-gray-600 dark:text-gray-400">Include Zerodha Equity Delivery Charges</span>
+              <span className="text-xs text-gray-600 dark:text-gray-400">Include US Equity Trading Charges</span>
             </label>
           </div>
         </div>
@@ -336,10 +333,10 @@ export default function PortfolioSimulator({
           Starting Investment
         </label>
         <div className="relative">
-          <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
-            value={startingAmount.toLocaleString('en-IN')}
+            value={startingAmount.toLocaleString('en-US')}
             onChange={handleAmountChange}
             className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-nifty-500 focus:border-transparent"
           />
@@ -355,7 +352,7 @@ export default function PortfolioSimulator({
                   : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-slate-600'
               }`}
             >
-              {formatINR(amount, 0)}
+              {formatUSD(amount, 0)}
             </button>
           ))}
         </div>
@@ -369,7 +366,7 @@ export default function PortfolioSimulator({
             <InfoButton onClick={() => setActiveModal('portfolioValue')} />
           </div>
           <div className={`text-xl font-bold ${getValueColorClass(profitLoss)}`}>
-            {formatINR(finalValue, 0)}
+            {formatUSD(finalValue, 0)}
           </div>
         </div>
         <div className="p-3 rounded-lg bg-gray-50 dark:bg-slate-700/50">
@@ -378,7 +375,7 @@ export default function PortfolioSimulator({
             <InfoButton onClick={() => setActiveModal('profitLoss')} />
           </div>
           <div className={`text-xl font-bold ${getValueColorClass(profitLoss)}`}>
-            {isPositive ? '+' : ''}{formatINR(profitLoss, 0)}
+            {isPositive ? '+' : ''}{formatUSD(profitLoss, 0)}
             <span className="text-sm ml-1">({isPositive ? '+' : ''}{totalReturn.toFixed(1)}%)</span>
           </div>
         </div>
@@ -418,7 +415,7 @@ export default function PortfolioSimulator({
           onClick={() => setShowBrokerageDetails(!showBrokerageDetails)}
           title="Click for detailed breakdown"
         >
-          <div className="text-lg font-bold text-amber-600 dark:text-amber-400">{formatINR(totalCharges, 0)}</div>
+          <div className="text-lg font-bold text-amber-600 dark:text-amber-400">{formatUSD(totalCharges, 0)}</div>
           <div className="text-[10px] text-amber-600/70 dark:text-amber-400/70 flex items-center justify-center gap-0.5">
             Total Charges <Info className="w-2.5 h-2.5" />
           </div>
@@ -443,42 +440,30 @@ export default function PortfolioSimulator({
         <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800/30">
           <div className="flex items-center gap-2 mb-2">
             <Receipt className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-            <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">Zerodha Equity Delivery Charges</span>
+            <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">US Equity Trading Charges</span>
           </div>
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="flex justify-between">
               <span className="text-gray-600 dark:text-gray-400">Brokerage:</span>
-              <span className="font-medium text-gray-800 dark:text-gray-200">{formatINR(stats.brokerageBreakdown.brokerage)}</span>
+              <span className="font-medium text-gray-800 dark:text-gray-200">{formatUSD(stats.brokerageBreakdown.brokerage)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600 dark:text-gray-400">STT:</span>
-              <span className="font-medium text-gray-800 dark:text-gray-200">{formatINR(stats.brokerageBreakdown.stt)}</span>
+              <span className="text-gray-600 dark:text-gray-400">SEC Fee:</span>
+              <span className="font-medium text-gray-800 dark:text-gray-200">{formatUSD(stats.brokerageBreakdown.secFee)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600 dark:text-gray-400">Exchange Charges:</span>
-              <span className="font-medium text-gray-800 dark:text-gray-200">{formatINR(stats.brokerageBreakdown.exchangeCharges)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600 dark:text-gray-400">SEBI Charges:</span>
-              <span className="font-medium text-gray-800 dark:text-gray-200">{formatINR(stats.brokerageBreakdown.sebiCharges)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600 dark:text-gray-400">GST (18%):</span>
-              <span className="font-medium text-gray-800 dark:text-gray-200">{formatINR(stats.brokerageBreakdown.gst)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600 dark:text-gray-400">Stamp Duty:</span>
-              <span className="font-medium text-gray-800 dark:text-gray-200">{formatINR(stats.brokerageBreakdown.stampDuty)}</span>
+              <span className="text-gray-600 dark:text-gray-400">TAF Fee:</span>
+              <span className="font-medium text-gray-800 dark:text-gray-200">{formatUSD(stats.brokerageBreakdown.tafFee)}</span>
             </div>
           </div>
           <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-700 flex justify-between">
             <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">Total Turnover:</span>
-            <span className="text-xs font-bold text-amber-800 dark:text-amber-300">{formatINR(stats.brokerageBreakdown.turnover, 0)}</span>
+            <span className="text-xs font-bold text-amber-800 dark:text-amber-300">{formatUSD(stats.brokerageBreakdown.turnover, 0)}</span>
           </div>
         </div>
       )}
 
-      {/* Comparison with Nifty */}
+      {/* Comparison with S&P 500 */}
       <div
         className="mb-4 p-3 rounded-lg bg-gradient-to-r from-nifty-50 to-blue-50 dark:from-nifty-900/20 dark:to-blue-900/20 border border-nifty-100 dark:border-nifty-800/30 cursor-pointer hover:shadow-md transition-shadow"
         onClick={() => setActiveModal('comparison')}
@@ -486,7 +471,7 @@ export default function PortfolioSimulator({
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <BarChart3 className="w-4 h-4 text-nifty-600 dark:text-nifty-400" />
-            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">vs Nifty 50 Index</span>
+            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">vs S&P 500 Index</span>
           </div>
           <HelpCircle className="w-3.5 h-3.5 text-gray-400" />
         </div>
@@ -498,10 +483,10 @@ export default function PortfolioSimulator({
             <div className="text-[10px] text-gray-500">AI Strategy</div>
           </div>
           <div>
-            <div className={`text-sm font-bold ${getValueColorClass(niftyReturn)}`}>
-              {niftyReturn >= 0 ? '+' : ''}{niftyReturn.toFixed(1)}%
+            <div className={`text-sm font-bold ${getValueColorClass(sp500Return)}`}>
+              {sp500Return >= 0 ? '+' : ''}{sp500Return.toFixed(1)}%
             </div>
-            <div className="text-[10px] text-gray-500">Nifty 50</div>
+            <div className="text-[10px] text-gray-500">S&P 500</div>
           </div>
           <div>
             <div className={`text-sm font-bold ${outperformance >= 0 ? 'text-nifty-600 dark:text-nifty-400' : 'text-red-600 dark:text-red-400'}`}>
@@ -512,7 +497,7 @@ export default function PortfolioSimulator({
         </div>
       </div>
 
-      {/* Chart with Nifty Comparison - Fixed Y-axis */}
+      {/* Chart with S&P 500 Comparison - Fixed Y-axis */}
       {portfolioData.length > 0 && (
         <div className="h-48 mb-4">
           <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
@@ -525,7 +510,7 @@ export default function PortfolioSimulator({
               />
               <YAxis
                 tick={{ fontSize: 10 }}
-                tickFormatter={(v) => formatINR(v, 0).replace('₹', '')}
+                tickFormatter={(v) => formatUSD(v, 0).replace('$', '')}
                 className="text-gray-500 dark:text-gray-400"
                 width={60}
                 domain={yAxisDomain}
@@ -538,13 +523,13 @@ export default function PortfolioSimulator({
                   fontSize: '12px',
                 }}
                 formatter={(value, name) => [
-                  formatINR(Number(value) || 0, 0),
-                  name === 'value' ? 'AI Strategy' : 'Nifty 50'
+                  formatUSD(Number(value) || 0, 0),
+                  name === 'value' ? 'AI Strategy' : 'S&P 500'
                 ]}
               />
               <Legend
                 wrapperStyle={{ fontSize: '10px' }}
-                formatter={(value) => value === 'value' ? 'AI Strategy' : 'Nifty 50'}
+                formatter={(value) => value === 'value' ? 'AI Strategy' : 'S&P 500'}
               />
               <ReferenceLine
                 y={startingAmount}
@@ -562,8 +547,8 @@ export default function PortfolioSimulator({
               />
               <Line
                 type="monotone"
-                dataKey="niftyValue"
-                name="niftyValue"
+                dataKey="sp500Value"
+                name="sp500Value"
                 stroke="#6366f1"
                 strokeWidth={2}
                 strokeDasharray="4 4"
@@ -600,7 +585,7 @@ export default function PortfolioSimulator({
                     ...t,
                     idx: i,
                     displayName: `${t.symbol}`,
-                    duration: `${new Date(t.entryDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })} → ${new Date(t.exitDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}`,
+                    duration: `${new Date(t.entryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} → ${new Date(t.exitDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
                   }))}
                   layout="vertical"
                   margin={{ top: 5, right: 60, bottom: 5, left: 70 }}
@@ -609,7 +594,7 @@ export default function PortfolioSimulator({
                   <XAxis
                     type="number"
                     tick={{ fontSize: 9 }}
-                    tickFormatter={(v) => formatINR(v, 0)}
+                    tickFormatter={(v) => formatUSD(v, 0)}
                     domain={['dataMin', 'dataMax']}
                   />
                   <YAxis
@@ -625,7 +610,7 @@ export default function PortfolioSimulator({
                       borderRadius: '8px',
                       fontSize: '11px',
                     }}
-                    formatter={(value) => [formatINR(Number(value) || 0, 2), 'P/L']}
+                    formatter={(value) => [formatUSD(Number(value) || 0, 2), 'P/L']}
                     labelFormatter={(_, payload) => {
                       if (payload && payload[0]) {
                         const d = payload[0].payload;
@@ -644,7 +629,7 @@ export default function PortfolioSimulator({
                     <LabelList
                       dataKey="profitLoss"
                       position="right"
-                      formatter={(v) => formatINR(Number(v) || 0, 0)}
+                      formatter={(v) => formatUSD(Number(v) || 0, 0)}
                       style={{ fontSize: 9, fill: '#6b7280' }}
                     />
                   </Bar>
@@ -672,7 +657,7 @@ export default function PortfolioSimulator({
                 <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Date</th>
                 <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">Return</th>
                 <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">AI Value</th>
-                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">Nifty</th>
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">S&P 500</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
@@ -683,10 +668,10 @@ export default function PortfolioSimulator({
                     {day.return >= 0 ? '+' : ''}{day.return.toFixed(1)}%
                   </td>
                   <td className="px-3 py-2 text-right text-gray-700 dark:text-gray-300">
-                    {formatINR(day.value, 0)}
+                    {formatUSD(day.value, 0)}
                   </td>
                   <td className="px-3 py-2 text-right text-indigo-600 dark:text-indigo-400">
-                    {formatINR(day.niftyValue, 0)}
+                    {formatUSD(day.sp500Value, 0)}
                   </td>
                 </tr>
               ))}
@@ -696,9 +681,9 @@ export default function PortfolioSimulator({
       )}
 
       <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-3 text-center">
-        Simulated using Zerodha Equity Delivery rates (0% brokerage, STT 0.1%, Exchange 0.00345%, SEBI 0.0001%, Stamp 0.015%).
+        Simulated using US commission-free broker rates (SEC Fee $8/$1M, TAF $0.000166/share).
         {investmentMode === 'topPicks' ? ' Investing in Top Picks only.' : ' Investing in all 50 stocks.'}
-        {includeBrokerage ? ` Total Charges: ${formatINR(totalCharges, 0)}` : ''}
+        {includeBrokerage ? ` Total Charges: ${formatUSD(totalCharges, 0)}` : ''}
       </p>
 
       {/* Info Modals */}
@@ -769,10 +754,10 @@ export default function PortfolioSimulator({
             <div className="font-semibold text-nifty-800 dark:text-nifty-200 mb-1">Calculation:</div>
             <code className="text-xs">Final Value = Portfolio Value - Total Charges</code>
             <div className="mt-2 text-xs">
-              = {formatINR(currentValue, 0)} - {formatINR(totalCharges, 0)} = <strong>{formatINR(finalValue, 0)}</strong>
+              = {formatUSD(currentValue, 0)} - {formatUSD(totalCharges, 0)} = <strong>{formatUSD(finalValue, 0)}</strong>
             </div>
           </div>
-          <p className="text-xs text-gray-500">This includes all realized gains/losses from completed trades and deducts Zerodha brokerage charges.</p>
+          <p className="text-xs text-gray-500">This includes all realized gains/losses from completed trades and deducts US regulatory trading charges.</p>
         </div>
       </InfoModal>
 
@@ -788,10 +773,10 @@ export default function PortfolioSimulator({
             <div className="font-semibold mb-1">Calculation:</div>
             <code className="text-xs">Net P/L = Final Value - Starting Investment</code>
             <div className="mt-2 text-xs">
-              = {formatINR(finalValue, 0)} - {formatINR(startingAmount, 0)} = <strong className={profitLoss >= 0 ? 'text-green-600' : 'text-red-600'}>{formatINR(profitLoss, 0)}</strong>
+              = {formatUSD(finalValue, 0)} - {formatUSD(startingAmount, 0)} = <strong className={profitLoss >= 0 ? 'text-green-600' : 'text-red-600'}>{formatUSD(profitLoss, 0)}</strong>
             </div>
             <div className="mt-2 text-xs">
-              Return = ({formatINR(profitLoss, 0)} / {formatINR(startingAmount, 0)}) × 100 = <strong>{totalReturn.toFixed(2)}%</strong>
+              Return = ({formatUSD(profitLoss, 0)} / {formatUSD(startingAmount, 0)}) × 100 = <strong>{totalReturn.toFixed(2)}%</strong>
             </div>
           </div>
         </div>
@@ -800,19 +785,19 @@ export default function PortfolioSimulator({
       <InfoModal
         isOpen={activeModal === 'comparison'}
         onClose={() => setActiveModal(null)}
-        title="vs Nifty 50 Index"
+        title="vs S&P 500 Index"
         icon={<BarChart3 className="w-5 h-5 text-nifty-600 dark:text-nifty-400" />}
       >
         <div className="space-y-3 text-sm text-gray-600 dark:text-gray-300">
-          <p>This compares the AI strategy's performance against simply investing in the Nifty 50 index.</p>
+          <p>This compares the AI strategy's performance against simply investing in the S&P 500 index.</p>
           <div className="space-y-2">
             <div className="p-2 bg-green-50 dark:bg-green-900/20 rounded-lg flex justify-between items-center">
               <span>AI Strategy Return:</span>
               <strong className={totalReturn >= 0 ? 'text-green-600' : 'text-red-600'}>{totalReturn.toFixed(2)}%</strong>
             </div>
             <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg flex justify-between items-center">
-              <span>Nifty 50 Return:</span>
-              <strong className={niftyReturn >= 0 ? 'text-green-600' : 'text-red-600'}>{niftyReturn.toFixed(2)}%</strong>
+              <span>S&P 500 Return:</span>
+              <strong className={sp500Return >= 0 ? 'text-green-600' : 'text-red-600'}>{sp500Return.toFixed(2)}%</strong>
             </div>
             <div className="p-2 bg-nifty-50 dark:bg-nifty-900/20 rounded-lg flex justify-between items-center">
               <span>Outperformance (Alpha):</span>
@@ -821,8 +806,8 @@ export default function PortfolioSimulator({
           </div>
           <p className="text-xs text-gray-500">
             {outperformance >= 0
-              ? `The AI strategy beat the Nifty 50 index by ${outperformance.toFixed(2)} percentage points.`
-              : `The AI strategy underperformed the Nifty 50 index by ${Math.abs(outperformance).toFixed(2)} percentage points.`
+              ? `The AI strategy beat the S&P 500 index by ${outperformance.toFixed(2)} percentage points.`
+              : `The AI strategy underperformed the S&P 500 index by ${Math.abs(outperformance).toFixed(2)} percentage points.`
             }
           </p>
         </div>

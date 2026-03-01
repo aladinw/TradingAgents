@@ -4,7 +4,7 @@ from dateutil.relativedelta import relativedelta
 import yfinance as yf
 import os
 from .stockstats_utils import StockstatsUtils
-from .markets import normalize_symbol, is_nifty_50_stock
+from .markets import normalize_symbol, is_sp500_top50_stock
 
 def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
@@ -15,7 +15,6 @@ def get_YFin_data_online(
     datetime.strptime(start_date, "%Y-%m-%d")
     datetime.strptime(end_date, "%Y-%m-%d")
 
-    # Normalize symbol for yfinance (adds .NS suffix for NSE stocks)
     normalized_symbol = normalize_symbol(symbol, target="yfinance")
 
     # Create ticker object
@@ -377,7 +376,6 @@ def get_balance_sheet(
 ):
     """Get balance sheet data from yfinance, filtered by curr_date for backtesting accuracy."""
     try:
-        # Normalize symbol for yfinance (adds .NS suffix for NSE stocks)
         normalized_ticker = normalize_symbol(ticker, target="yfinance")
         ticker_obj = yf.Ticker(normalized_ticker)
 
@@ -417,7 +415,6 @@ def get_cashflow(
 ):
     """Get cash flow data from yfinance, filtered by curr_date for backtesting accuracy."""
     try:
-        # Normalize symbol for yfinance (adds .NS suffix for NSE stocks)
         normalized_ticker = normalize_symbol(ticker, target="yfinance")
         ticker_obj = yf.Ticker(normalized_ticker)
 
@@ -457,7 +454,6 @@ def get_income_statement(
 ):
     """Get income statement data from yfinance, filtered by curr_date for backtesting accuracy."""
     try:
-        # Normalize symbol for yfinance (adds .NS suffix for NSE stocks)
         normalized_ticker = normalize_symbol(ticker, target="yfinance")
         ticker_obj = yf.Ticker(normalized_ticker)
 
@@ -825,30 +821,29 @@ def get_sector_performance(
             sections.append(f"  Beta: {beta}")
         sections.append("")
 
-        # Nifty50 index comparison (for Indian stocks)
-        if is_nifty_50_stock(ticker):
-            try:
-                end_date = curr_date or datetime.now().strftime("%Y-%m-%d")
-                from dateutil.relativedelta import relativedelta as _rd
-                start_date_dt = datetime.strptime(end_date, "%Y-%m-%d") - _rd(days=30)
-                start_date = start_date_dt.strftime("%Y-%m-%d")
+        # S&P 500 index comparison
+        try:
+            end_date = curr_date or datetime.now().strftime("%Y-%m-%d")
+            from dateutil.relativedelta import relativedelta as _rd
+            start_date_dt = datetime.strptime(end_date, "%Y-%m-%d") - _rd(days=30)
+            start_date = start_date_dt.strftime("%Y-%m-%d")
 
-                nifty = yf.Ticker("^NSEI")
-                nifty_hist = nifty.history(start=start_date, end=end_date)
-                if not nifty_hist.empty:
-                    nifty_return = ((nifty_hist['Close'].iloc[-1] - nifty_hist['Close'].iloc[0]) / nifty_hist['Close'].iloc[0]) * 100
-                    sections.append("## Nifty50 Index (30-day)")
-                    sections.append(f"  Nifty50 Return: {nifty_return:.1f}%")
+            sp500 = yf.Ticker("^GSPC")
+            sp500_hist = sp500.history(start=start_date, end=end_date)
+            if not sp500_hist.empty:
+                sp500_return = ((sp500_hist['Close'].iloc[-1] - sp500_hist['Close'].iloc[0]) / sp500_hist['Close'].iloc[0]) * 100
+                sections.append("## S&P 500 Index (30-day)")
+                sections.append(f"  S&P 500 Return: {sp500_return:.1f}%")
 
-                stock_hist = ticker_obj.history(start=start_date, end=end_date)
-                if not stock_hist.empty:
-                    stock_return = ((stock_hist['Close'].iloc[-1] - stock_hist['Close'].iloc[0]) / stock_hist['Close'].iloc[0]) * 100
-                    sections.append(f"  {normalized_ticker} Return: {stock_return:.1f}%")
-                    alpha = stock_return - nifty_return
-                    sections.append(f"  Alpha vs Nifty: {alpha:+.1f}%")
-                sections.append("")
-            except Exception:
-                sections.append("## Nifty50 Comparison\nUnable to fetch index data\n")
+            stock_hist = ticker_obj.history(start=start_date, end=end_date)
+            if not stock_hist.empty:
+                stock_return = ((stock_hist['Close'].iloc[-1] - stock_hist['Close'].iloc[0]) / stock_hist['Close'].iloc[0]) * 100
+                sections.append(f"  {normalized_ticker} Return: {stock_return:.1f}%")
+                alpha = stock_return - sp500_return
+                sections.append(f"  Alpha vs S&P 500: {alpha:+.1f}%")
+            sections.append("")
+        except Exception:
+            sections.append("## S&P 500 Comparison\nUnable to fetch index data\n")
 
         return "\n".join(sections)
 
@@ -928,16 +923,11 @@ def get_insider_transactions(
 ):
     """Get insider transactions data from yfinance."""
     try:
-        # Normalize symbol for yfinance (adds .NS suffix for NSE stocks)
         normalized_ticker = normalize_symbol(ticker, target="yfinance")
         ticker_obj = yf.Ticker(normalized_ticker)
         data = ticker_obj.insider_transactions
 
         if data is None or data.empty:
-            # Check if this is an NSE stock - insider data may not be available
-            if is_nifty_50_stock(ticker):
-                return (f"Note: SEC-style insider transaction data is not available for Indian NSE stocks like {normalized_ticker}. "
-                        f"For Indian stocks, insider trading disclosures are filed with SEBI and available through NSE/BSE websites.")
             return f"No insider transactions data found for symbol '{normalized_ticker}'"
 
         # Convert to CSV string for consistency with other functions

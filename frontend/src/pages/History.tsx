@@ -151,7 +151,7 @@ export default function History() {
   const [recommendations, setRecommendations] = useState<DailyRecommendation[]>([]);
   const [batchBacktestByDate, setBatchBacktestByDate] = useState<BacktestByDate>({});
   const [isLoading, setIsLoading] = useState(true);
-  const [nifty50Prices, setNifty50Prices] = useState<Record<string, number>>({});
+  const [sp500Prices, setSp500Prices] = useState<Record<string, number>>({});
   const [apiAccuracyMetrics, setApiAccuracyMetrics] = useState<{
     overall_accuracy: number;
     total_predictions: number;
@@ -180,8 +180,8 @@ export default function History() {
           setApiAccuracyMetrics(bundle.accuracy);
         }
 
-        if (bundle.nifty50_prices && Object.keys(bundle.nifty50_prices).length > 0) {
-          setNifty50Prices(bundle.nifty50_prices);
+        if (bundle.sp500_prices && Object.keys(bundle.sp500_prices).length > 0) {
+          setSp500Prices(bundle.sp500_prices);
         }
 
         setLoadTimeMs(Math.round(performance.now() - t0));
@@ -195,22 +195,22 @@ export default function History() {
     fetchBundle();
   }, []);
 
-  // If Nifty50 wasn't in the bundle (cache cold), retry once after 3s
-  const niftyRetried = useRef(false);
+  // If S&P 500 wasn't in the bundle (cache cold), retry once after 3s
+  const sp500Retried = useRef(false);
   useEffect(() => {
-    if (!isLoading && Object.keys(nifty50Prices).length === 0 && !niftyRetried.current) {
-      niftyRetried.current = true;
+    if (!isLoading && Object.keys(sp500Prices).length === 0 && !sp500Retried.current) {
+      sp500Retried.current = true;
       const timer = setTimeout(async () => {
         try {
-          const data = await api.getNifty50History();
+          const data = await api.getSP500History();
           if (data.prices && Object.keys(data.prices).length > 0) {
-            setNifty50Prices(data.prices);
+            setSp500Prices(data.prices);
           }
         } catch { /* ignore */ }
       }, 3000);
       return () => clearTimeout(timer);
     }
-  }, [isLoading, nifty50Prices]);
+  }, [isLoading, sp500Prices]);
 
   const dates = recommendations.map(r => r.date);
   const hasBacktestData = Object.keys(batchBacktestByDate).length > 0;
@@ -324,17 +324,17 @@ export default function History() {
     const cumulativeData: CumulativeReturnPoint[] = [];
     let aiMultiplier = 1;
 
-    // Nifty50 price ratio approach: direct comparison to start price
-    // This avoids losing Nifty returns on days without backtest data
-    const sortedNiftyDates = Object.keys(nifty50Prices).sort();
-    const hasNiftyData = sortedNiftyDates.length > 0;
-    const niftyStartPrice = hasNiftyData ? nifty50Prices[sortedNiftyDates[0]] : null;
+    // S&P 500 price ratio approach: direct comparison to start price
+    // This avoids losing S&P 500 returns on days without backtest data
+    const sortedSP500Dates = Object.keys(sp500Prices).sort();
+    const hasSP500Data = sortedSP500Dates.length > 0;
+    const sp500StartPrice = hasSP500Data ? sp500Prices[sortedSP500Dates[0]] : null;
 
-    const getNiftyReturnForDate = (date: string): number => {
-      if (!hasNiftyData || !niftyStartPrice) return 0;
-      const closestDate = sortedNiftyDates.find(d => d >= date) || sortedNiftyDates[sortedNiftyDates.length - 1];
-      if (!closestDate || !nifty50Prices[closestDate]) return 0;
-      return ((nifty50Prices[closestDate] / niftyStartPrice) - 1) * 100;
+    const getSP500ReturnForDate = (date: string): number => {
+      if (!hasSP500Data || !sp500StartPrice) return 0;
+      const closestDate = sortedSP500Dates.find(d => d >= date) || sortedSP500Dates[sortedSP500Dates.length - 1];
+      if (!closestDate || !sp500Prices[closestDate]) return 0;
+      return ((sp500Prices[closestDate] / sp500StartPrice) - 1) * 100;
     };
 
     const dateReturnsMap: Record<string, number> = {};
@@ -388,13 +388,13 @@ export default function History() {
         else if (weightedReturn < 0) { losses++; totalLossReturn += Math.abs(weightedReturn); }
 
         aiMultiplier *= (1 + weightedReturn / 100);
-        const niftyCumulativeReturn = getNiftyReturnForDate(date);
+        const sp500CumulativeReturn = getSP500ReturnForDate(date);
 
         cumulativeData.push({
           date,
           value: Math.round(aiMultiplier * 10000) / 100,
           aiReturn: Math.round((aiMultiplier - 1) * 1000) / 10,
-          indexReturn: Math.round(niftyCumulativeReturn * 10) / 10,
+          indexReturn: Math.round(sp500CumulativeReturn * 10) / 10,
         });
       }
     }
@@ -520,12 +520,12 @@ export default function History() {
         const avgReturn = dateReturn / dateCount;
         topPicksDailyReturnsArr.push(avgReturn);
         topPicksMultiplier *= (1 + avgReturn / 100);
-        const topPicksNiftyReturn = getNiftyReturnForDate(date);
+        const topPicksSP500Return = getSP500ReturnForDate(date);
         topPicksCumulative.push({
           date,
           value: Math.round(topPicksMultiplier * 10000) / 100,
           aiReturn: Math.round((topPicksMultiplier - 1) * 1000) / 10,
-          indexReturn: Math.round(topPicksNiftyReturn * 10) / 10,
+          indexReturn: Math.round(topPicksSP500Return * 10) / 10,
         });
       }
     }
@@ -558,7 +558,7 @@ export default function History() {
       dailyReturnsArray: dailyReturns,
       topPicksDailyReturns: topPicksDailyReturnsArr,
     };
-  }, [batchBacktestByDate, hasBacktestData, recommendations, nifty50Prices]);
+  }, [batchBacktestByDate, hasBacktestData, recommendations, sp500Prices]);
 
   // Overall stats
   const overallStats = useMemo(() => {
@@ -971,7 +971,7 @@ export default function History() {
       {/* Portfolio Simulator */}
       <PortfolioSimulator
         recommendations={recommendations}
-        nifty50Prices={nifty50Prices}
+        sp500Prices={sp500Prices}
         allBacktestData={chartData.allBacktestData}
       />
 
@@ -1072,7 +1072,7 @@ export default function History() {
                       : 'bg-white dark:bg-slate-700/80 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-slate-600 hover:border-nifty-300 dark:hover:border-nifty-700 hover:shadow-md'
                   }`}
                 >
-                  <div className="font-bold">{new Date(date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}</div>
+                  <div className="font-bold">{new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
                   {!hasData ? (
                     <div className={`text-sm mt-0.5 ${selectedDate === date ? 'text-white/60' : 'text-gray-400 dark:text-gray-500'}`}>
                       Pending
@@ -1130,7 +1130,7 @@ export default function History() {
                   <Calendar className="w-4 h-4 text-nifty-600 dark:text-nifty-400" />
                 </div>
                 <h2 className="font-bold text-gray-900 dark:text-gray-100">
-                  {new Date(selectedDate).toLocaleDateString('en-IN', {
+                  {new Date(selectedDate).toLocaleDateString('en-US', {
                     weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
                   })}
                 </h2>
@@ -1214,9 +1214,9 @@ export default function History() {
                       <div className="flex items-center gap-3">
                         {stock.price_at_prediction !== null && (
                           <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums hidden sm:inline">
-                            ₹{stock.price_at_prediction.toFixed(0)}
+                            ${stock.price_at_prediction.toFixed(0)}
                             <span className="mx-1">→</span>
-                            ₹{(stock.hold_period_active ? stock.price_current : stock.price_at_hold_end)?.toFixed(0) ?? '—'}
+                            ${(stock.hold_period_active ? stock.price_current : stock.price_at_hold_end)?.toFixed(0) ?? '—'}
                           </span>
                         )}
                         {returnVal !== null && (
@@ -1452,11 +1452,11 @@ export default function History() {
         </p>
       </div>
 
-      {/* AI vs Nifty50 Index Comparison */}
+      {/* AI vs S&P 500 Index Comparison */}
       <section className="card p-5">
         <SectionHeader
           icon={<BarChart3 className="w-4 h-4 text-nifty-600 dark:text-nifty-400" />}
-          title="AI Strategy vs Nifty50 Index"
+          title="AI Strategy vs S&P 500 Index"
           right={<InvestmentModeToggle mode={indexChartMode} onChange={setIndexChartMode} />}
         />
         <IndexComparisonChart
@@ -1467,7 +1467,7 @@ export default function History() {
           {(indexChartMode === 'topPicks' ? chartData.topPicksCumulativeReturns : chartData.cumulativeReturns)?.length ? (
             <>Cumulative returns for {indexChartMode === 'topPicks' ? 'Top Picks' : 'All 50 stocks'} over {(indexChartMode === 'topPicks' ? chartData.topPicksCumulativeReturns : chartData.cumulativeReturns)?.length} trading days</>
           ) : (
-            <>AI strategy vs Nifty50 index cumulative returns</>
+            <>AI strategy vs S&P 500 index cumulative returns</>
           )}
         </p>
       </section>
@@ -1517,7 +1517,7 @@ export default function History() {
             <div className="font-semibold text-nifty-800 dark:text-nifty-200 mb-1">Current Count:</div>
             <div className="text-2xl font-bold text-nifty-600 dark:text-nifty-400">{filteredStats.totalDays} days</div>
           </div>
-          <p className="text-xs text-gray-500">Each day includes analysis for {summaryMode === 'topPicks' ? '3 top picks' : 'all 50 Nifty stocks'}.</p>
+          <p className="text-xs text-gray-500">Each day includes analysis for {summaryMode === 'topPicks' ? '3 top picks' : 'all 50 S&P 500 stocks'}.</p>
         </div>
       </InfoModal>
 

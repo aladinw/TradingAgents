@@ -44,7 +44,7 @@ def calculate_backtest_for_recommendation(date: str, symbol: str, decision: str,
 
     Args:
         date: Prediction date (YYYY-MM-DD)
-        symbol: Stock symbol (NSE format like RELIANCE.NS)
+        symbol: Stock symbol (e.g. AAPL, MSFT)
         decision: BUY, SELL, or HOLD
         hold_days: Recommended holding period in days (for BUY/HOLD)
 
@@ -55,8 +55,7 @@ def calculate_backtest_for_recommendation(date: str, symbol: str, decision: str,
         # Convert date
         pred_date = datetime.strptime(date, '%Y-%m-%d')
 
-        # For Indian stocks, append .NS suffix if not present
-        yf_symbol = symbol if '.' in symbol else f"{symbol}.NS"
+        yf_symbol = symbol
 
         ticker = yf.Ticker(yf_symbol)
 
@@ -225,7 +224,7 @@ def get_backtest_data_for_frontend(date: str, symbol: str) -> dict:
     # Get price history for chart
     try:
         pred_date = datetime.strptime(date, '%Y-%m-%d')
-        yf_symbol = symbol if '.' in symbol else f"{symbol}.NS"
+        yf_symbol = symbol
         ticker = yf.Ticker(yf_symbol)
 
         # Get 30 days of history starting from prediction date

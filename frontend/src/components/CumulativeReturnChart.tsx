@@ -21,7 +21,7 @@ export default function CumulativeReturnChart({ height = 160, className = '', da
   // Format dates for display
   const formattedData = data.map(d => ({
     ...d,
-    displayDate: new Date(d.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
+    displayDate: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
   }));
 
   const lastPoint = formattedData[formattedData.length - 1];

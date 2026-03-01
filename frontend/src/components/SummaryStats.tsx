@@ -48,7 +48,7 @@ export default function SummaryStats({ total, buy, sell, hold, date }: SummarySt
       <div className="flex items-center justify-between mb-6">
         <h2 className="section-title">Today's Summary</h2>
         <span className="text-sm text-gray-500">
-          {new Date(date).toLocaleDateString('en-IN', {
+          {new Date(date).toLocaleDateString('en-US', {
             weekday: 'long',
             year: 'numeric',
             month: 'long',

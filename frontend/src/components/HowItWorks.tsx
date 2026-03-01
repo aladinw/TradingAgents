@@ -10,7 +10,7 @@ const agents = [
     name: 'Market Data',
     icon: Database,
     color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400',
-    description: 'Real-time price data, volume, and market indicators from NSE',
+    description: 'Real-time price data, volume, and market indicators from NYSE/NASDAQ',
   },
   {
     name: 'Technical Analyst',

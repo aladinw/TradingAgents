@@ -33,14 +33,14 @@ const CustomTooltip = ({ active, payload, label }: any) => {
     return (
       <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg p-3">
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-          {new Date(label).toLocaleDateString('en-IN', {
+          {new Date(label).toLocaleDateString('en-US', {
             weekday: 'short',
             month: 'short',
             day: 'numeric',
           })}
         </p>
         <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          ₹{data.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+          ${data.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}
         </p>
         {data.prediction && (
           <div className={`mt-1 text-xs font-medium flex items-center gap-1 ${
@@ -199,7 +199,7 @@ export default function StockPriceChart({
             tick={{ fontSize: 10, fill: tickColor }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={(date) => new Date(date).toLocaleDateString('en-IN', {
+            tickFormatter={(date) => new Date(date).toLocaleDateString('en-US', {
               month: 'short',
               day: 'numeric',
             })}
@@ -212,7 +212,7 @@ export default function StockPriceChart({
             tick={{ fontSize: 10, fill: tickColor }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={(value) => `₹${value}`}
+            tickFormatter={(value) => `$${value}`}
             width={60}
           />
 

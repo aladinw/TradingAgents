@@ -28,7 +28,7 @@ export default function AccuracyTrendChart({ height = 200, className = '', data:
   // Format dates for display
   const formattedData = data.map(d => ({
     ...d,
-    displayDate: new Date(d.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
+    displayDate: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
   }));
 
   return (

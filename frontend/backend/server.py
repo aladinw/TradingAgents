@@ -1,4 +1,4 @@
-"""FastAPI server for Nifty50 AI recommendations."""
+"""FastAPI server for US Stocks AI recommendations."""
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -28,8 +28,8 @@ from tradingagents.log_utils import add_log, analysis_logs, log_lock, log_subscr
 running_analyses = {}  # {symbol: {"status": "running", "started_at": datetime, "progress": str}}
 
 app = FastAPI(
-    title="Nifty50 AI API",
-    description="API for Nifty 50 stock recommendations",
+    title="US Stocks AI API",
+    description="API for S&P 500 Top 50 stock recommendations",
     version="1.0.0"
 )
 
@@ -259,6 +259,48 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
         db.save_single_stock_analysis(date, symbol, analysis_data)
         add_log("info", "system", f"💾 Saved analysis for {symbol} to database")
 
+        # Save agent reports and debate data to pipeline tables
+        if final_state:
+            # Save individual analyst reports
+            agent_reports = {}
+            if final_state.get("market_report"):
+                agent_reports["market"] = {"report_content": final_state["market_report"]}
+            if final_state.get("news_report"):
+                agent_reports["news"] = {"report_content": final_state["news_report"]}
+            if final_state.get("sentiment_report"):
+                agent_reports["social"] = {"report_content": final_state["sentiment_report"]}
+            if final_state.get("fundamentals_report"):
+                agent_reports["fundamentals"] = {"report_content": final_state["fundamentals_report"]}
+            if final_state.get("trader_investment_plan"):
+                agent_reports["trader"] = {"report_content": final_state["trader_investment_plan"]}
+
+            if agent_reports:
+                db.save_agent_reports_bulk(date, symbol, agent_reports)
+                add_log("info", "system", f"💾 Saved {len(agent_reports)} agent reports for {symbol}")
+
+            # Save investment debate
+            invest_debate = final_state.get("investment_debate_state", {})
+            if invest_debate.get("judge_decision"):
+                db.save_debate_history(
+                    date, symbol, "investment",
+                    bull_arguments=invest_debate.get("bull_history", ""),
+                    bear_arguments=invest_debate.get("bear_history", ""),
+                    judge_decision=invest_debate.get("judge_decision", ""),
+                    full_history=invest_debate.get("history", ""),
+                )
+
+            # Save risk debate
+            risk_debate = final_state.get("risk_debate_state", {})
+            if risk_debate.get("judge_decision"):
+                db.save_debate_history(
+                    date, symbol, "risk",
+                    risky_arguments=risk_debate.get("risky_history", ""),
+                    safe_arguments=risk_debate.get("safe_history", ""),
+                    neutral_arguments=risk_debate.get("neutral_history", ""),
+                    judge_decision=risk_debate.get("judge_decision", ""),
+                    full_history=risk_debate.get("history", ""),
+                )
+
         # Auto-update daily recommendation summary (counts, top_picks, stocks_to_avoid)
         db.update_daily_recommendation_summary(date)
         add_log("info", "system", f"📊 Updated daily recommendation summary for {date}")
@@ -304,7 +346,7 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
 async def root():
     """API root endpoint."""
     return {
-        "name": "Nifty50 AI API",
+        "name": "US Stocks AI API",
         "version": "2.0.0",
         "endpoints": {
             "GET /recommendations": "Get all recommendations",
@@ -572,15 +614,13 @@ def _save_schedule_config(config):
 
 schedule_config = _load_schedule_config()
 
-# List of Nifty 50 stocks
-NIFTY_50_SYMBOLS = [
-    "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "HINDUNILVR", "ITC", "SBIN",
-    "BHARTIARTL", "KOTAKBANK", "LT", "AXISBANK", "ASIANPAINT", "MARUTI", "HCLTECH",
-    "SUNPHARMA", "TITAN", "BAJFINANCE", "WIPRO", "ULTRACEMCO", "NESTLEIND", "NTPC",
-    "POWERGRID", "M&M", "TATAMOTORS", "ONGC", "JSWSTEEL", "TATASTEEL", "ADANIENT",
-    "ADANIPORTS", "COALINDIA", "BAJAJFINSV", "TECHM", "HDFCLIFE", "SBILIFE", "GRASIM",
-    "DIVISLAB", "DRREDDY", "CIPLA", "BRITANNIA", "EICHERMOT", "APOLLOHOSP", "INDUSINDBK",
-    "HEROMOTOCO", "TATACONSUM", "BPCL", "UPL", "HINDALCO", "BAJAJ-AUTO", "LTIM"
+# List of S&P 500 Top 50 stocks
+SP500_TOP_50_SYMBOLS = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK-B", "AVGO", "LLY", "JPM",
+    "TSLA", "XOM", "UNH", "V", "MA", "PG", "COST", "JNJ", "HD", "ABBV",
+    "WMT", "NFLX", "CRM", "BAC", "ORCL", "CVX", "MRK", "KO", "AMD", "CSCO",
+    "PEP", "ACN", "TMO", "LIN", "ADBE", "MCD", "ABT", "WFC", "GE", "IBM",
+    "DHR", "QCOM", "CAT", "INTU", "DIS", "AMAT", "TXN", "NOW", "PM", "GS"
 ]
 
 
@@ -595,7 +635,7 @@ class BulkAnalysisRequest(BaseModel):
 
 @app.post("/analyze/all")
 async def run_bulk_analysis(request: Optional[BulkAnalysisRequest] = None, date: Optional[str] = None):
-    """Trigger analysis for all Nifty 50 stocks. Runs in background with parallel processing."""
+    """Trigger analysis for all S&P 500 Top 50 stocks. Runs in background with parallel processing."""
     global bulk_analysis_state
 
     # Check if bulk analysis is already running
@@ -625,7 +665,7 @@ async def run_bulk_analysis(request: Optional[BulkAnalysisRequest] = None, date:
 
     # Resume support: skip stocks already analyzed for this date
     already_analyzed = set(db.get_analyzed_symbols_for_date(date))
-    symbols_to_analyze = [s for s in NIFTY_50_SYMBOLS if s not in already_analyzed]
+    symbols_to_analyze = [s for s in SP500_TOP_50_SYMBOLS if s not in already_analyzed]
     skipped_count = len(already_analyzed)
 
     # If all stocks are already analyzed, return immediately
@@ -633,7 +673,7 @@ async def run_bulk_analysis(request: Optional[BulkAnalysisRequest] = None, date:
         bulk_analysis_state = {
             "status": "completed",
             "total": 0,
-            "total_all": len(NIFTY_50_SYMBOLS),
+            "total_all": len(SP500_TOP_50_SYMBOLS),
             "skipped": skipped_count,
             "completed": 0,
             "failed": 0,
@@ -690,7 +730,7 @@ async def run_bulk_analysis(request: Optional[BulkAnalysisRequest] = None, date:
         bulk_analysis_state = {
             "status": "running",
             "total": len(symbols_to_analyze),
-            "total_all": len(NIFTY_50_SYMBOLS),
+            "total_all": len(SP500_TOP_50_SYMBOLS),
             "skipped": skipped_count,
             "completed": 0,
             "failed": 0,
@@ -944,11 +984,11 @@ async def cancel_analysis(symbol: str):
 
 # ============== History Bundle Endpoint ==============
 
-# In-memory cache for Nifty50 index prices (fetched once, refreshed lazily)
-_nifty50_cache = {"prices": {}, "fetched_at": None}
+# In-memory cache for S&P 500 index prices (fetched once, refreshed lazily)
+_sp500_cache = {"prices": {}, "fetched_at": None}
 
-def _fetch_nifty50_prices_sync():
-    """Fetch Nifty50 index prices (called once and cached)."""
+def _fetch_sp500_prices_sync():
+    """Fetch S&P 500 index prices (called once and cached)."""
     try:
         import yfinance as yf
         from datetime import timedelta
@@ -960,8 +1000,8 @@ def _fetch_nifty50_prices_sync():
         start_date = (datetime.strptime(min(dates), "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
         end_date = (datetime.strptime(max(dates), "%Y-%m-%d") + timedelta(days=7)).strftime("%Y-%m-%d")
 
-        nifty = yf.Ticker("^NSEI")
-        hist = nifty.history(start=start_date, end=end_date, interval="1d")
+        sp500 = yf.Ticker("^GSPC")
+        hist = sp500.history(start=start_date, end=end_date, interval="1d")
 
         prices = {}
         for idx, row in hist.iterrows():
@@ -978,30 +1018,30 @@ async def get_history_bundle():
 
     Combines: recommendations + all backtest results + accuracy metrics.
     Everything comes from SQLite (instant), no yfinance calls.
-    Nifty50 prices are served from cache.
+    S&P 500 prices are served from cache.
     """
     recommendations = db.get_all_recommendations()
     backtest_by_date = db.get_all_backtest_results_grouped()
     accuracy = db.calculate_accuracy_metrics()
 
-    # Serve Nifty50 from cache, refresh in background if stale
-    nifty_prices = _nifty50_cache.get("prices", {})
-    if not _nifty50_cache.get("fetched_at"):
+    # Serve S&P 500 from cache, refresh in background if stale
+    sp500_prices = _sp500_cache.get("prices", {})
+    if not _sp500_cache.get("fetched_at"):
         # First request — return empty, trigger background fetch
         def bg_fetch():
-            prices = _fetch_nifty50_prices_sync()
-            _nifty50_cache["prices"] = prices
-            _nifty50_cache["fetched_at"] = datetime.now().isoformat()
+            prices = _fetch_sp500_prices_sync()
+            _sp500_cache["prices"] = prices
+            _sp500_cache["fetched_at"] = datetime.now().isoformat()
         thread = threading.Thread(target=bg_fetch, daemon=True)
         thread.start()
     else:
-        nifty_prices = _nifty50_cache["prices"]
+        sp500_prices = _sp500_cache["prices"]
 
     return {
         "recommendations": recommendations,
         "backtest_by_date": backtest_by_date,
         "accuracy": accuracy,
-        "nifty50_prices": nifty_prices,
+        "sp500_prices": sp500_prices,
     }
 
 
@@ -1046,7 +1086,7 @@ async def get_detailed_backtest(date: str):
         def fetch_live_batch():
             for sym in symbols_needing_live:
                 try:
-                    yf_sym = sym if '.' in sym else f"{sym}.NS"
+                    yf_sym = sym
                     t = yf.Ticker(yf_sym)
                     hist = t.history(period='1d')
                     if not hist.empty:
@@ -1093,16 +1133,16 @@ async def get_detailed_backtest(date: str):
             if hold_period_active and price_current:
                 ret = return_current or 0
                 sign = "+" if ret >= 0 else ""
-                formula = f"Return = (₹{price_current} - ₹{price_pred}) / ₹{price_pred} × 100 = {sign}{ret}%"
+                formula = f"Return = (${price_current} - ${price_pred}) / ${price_pred} × 100 = {sign}{ret}%"
             elif return_at_hold is not None:
                 p_end = price_at_hold_end or round(price_pred * (1 + return_at_hold / 100), 2)
                 sign = "+" if return_at_hold >= 0 else ""
-                formula = f"Return = (₹{p_end} - ₹{price_pred}) / ₹{price_pred} × 100 = {sign}{return_at_hold}%"
+                formula = f"Return = (${p_end} - ${price_pred}) / ${price_pred} × 100 = {sign}{return_at_hold}%"
             elif bt.get('return_1d') is not None:
                 p_1d = bt.get('price_1d_later', 0)
                 r_1d = bt['return_1d']
                 sign = "+" if r_1d >= 0 else ""
-                formula = f"Return = (₹{p_1d} - ₹{price_pred}) / ₹{price_pred} × 100 = {sign}{r_1d}%"
+                formula = f"Return = (${p_1d} - ${price_pred}) / ${price_pred} × 100 = {sign}{r_1d}%"
 
         # Prediction correctness
         prediction_correct = bt.get('prediction_correct')
@@ -1216,7 +1256,7 @@ async def get_stock_price_history(symbol: str, days: int = 90):
         import yfinance as yf
         from datetime import timedelta
 
-        yf_symbol = symbol if '.' in symbol else f"{symbol}.NS"
+        yf_symbol = symbol
         ticker = yf.Ticker(yf_symbol)
 
         end_date = datetime.now()
@@ -1240,11 +1280,11 @@ async def get_stock_price_history(symbol: str, days: int = 90):
         return {"symbol": symbol, "prices": [], "error": str(e)}
 
 
-# ============== Nifty50 Index Endpoint ==============
+# ============== S&P 500 Index Endpoint ==============
 
-@app.get("/nifty50/history")
-async def get_nifty50_history():
-    """Get Nifty50 index closing prices for recommendation date range."""
+@app.get("/sp500/history")
+async def get_sp500_history():
+    """Get S&P 500 index closing prices for recommendation date range."""
     try:
         import yfinance as yf
         from datetime import timedelta
@@ -1258,9 +1298,9 @@ async def get_nifty50_history():
         start_date = (datetime.strptime(min(dates), "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
         end_date = (datetime.strptime(max(dates), "%Y-%m-%d") + timedelta(days=7)).strftime("%Y-%m-%d")
 
-        # Fetch ^NSEI data
-        nifty = yf.Ticker("^NSEI")
-        hist = nifty.history(start=start_date, end=end_date, interval="1d")
+        # Fetch ^GSPC data
+        sp500 = yf.Ticker("^GSPC")
+        hist = sp500.history(start=start_date, end=end_date, interval="1d")
 
         prices = {}
         for idx, row in hist.iterrows():
@@ -1279,7 +1319,7 @@ async def get_nifty50_history():
 class ScheduleRequest(BaseModel):
     enabled: bool = False
     time: str = "09:00"
-    timezone: str = "Asia/Kolkata"
+    timezone: str = "America/New_York"
     config: dict = {}
 
 @app.post("/settings/schedule")
@@ -1372,7 +1412,7 @@ def _auto_analyze_scheduler():
             # Same logic as POST /analyze/all
             analysis_date = today_str
             already_analyzed = set(db.get_analyzed_symbols_for_date(analysis_date))
-            symbols_to_analyze = [s for s in NIFTY_50_SYMBOLS if s not in already_analyzed]
+            symbols_to_analyze = [s for s in SP500_TOP_50_SYMBOLS if s not in already_analyzed]
 
             if not symbols_to_analyze:
                 print(f"[AutoSchedule] All stocks already analyzed for {analysis_date}")
@@ -1383,7 +1423,7 @@ def _auto_analyze_scheduler():
                 bulk_analysis_state = {
                     "status": "running",
                     "total": len(symbols_to_analyze),
-                    "total_all": len(NIFTY_50_SYMBOLS),
+                    "total_all": len(SP500_TOP_50_SYMBOLS),
                     "skipped": len(already_analyzed),
                     "completed": 0,
                     "failed": 0,
@@ -1458,13 +1498,13 @@ async def startup_event():
     # Start auto-analyze scheduler
     threading.Thread(target=_auto_analyze_scheduler, daemon=True).start()
 
-    # Warm Nifty50 cache in background
-    def warm_nifty_cache():
-        prices = _fetch_nifty50_prices_sync()
-        _nifty50_cache["prices"] = prices
-        _nifty50_cache["fetched_at"] = datetime.now().isoformat()
-        print(f"[Nifty50] Cached {len(prices)} index prices")
-    threading.Thread(target=warm_nifty_cache, daemon=True).start()
+    # Warm S&P 500 cache in background
+    def warm_sp500_cache():
+        prices = _fetch_sp500_prices_sync()
+        _sp500_cache["prices"] = prices
+        _sp500_cache["fetched_at"] = datetime.now().isoformat()
+        print(f"[S&P500] Cached {len(prices)} index prices")
+    threading.Thread(target=warm_sp500_cache, daemon=True).start()
 
     # Trigger backtest calculation for all dates in background
     def startup_backtest():

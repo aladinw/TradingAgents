@@ -11,7 +11,7 @@ export default function Footer() {
             <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #0ea5e9, #0369a1)' }}>
               <TrendingUp className="w-3.5 h-3.5 text-white" />
             </div>
-            <span className="font-display font-bold text-sm gradient-text">Nifty50 AI</span>
+            <span className="font-display font-bold text-sm gradient-text">US Stocks AI</span>
           </div>
 
           {/* Links */}

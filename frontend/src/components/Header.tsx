@@ -26,7 +26,7 @@ export default function Header() {
             <div className="w-8 h-8 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105" style={{ background: 'linear-gradient(135deg, #0ea5e9, #0369a1)' }}>
               <TrendingUp className="w-4 h-4 text-white" />
             </div>
-            <span className="font-display font-bold gradient-text text-base tracking-tight">Nifty50 AI</span>
+            <span className="font-display font-bold gradient-text text-base tracking-tight">US Stocks AI</span>
           </Link>
 
           {/* Desktop Navigation */}

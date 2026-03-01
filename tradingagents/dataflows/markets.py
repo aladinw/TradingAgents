@@ -1,6 +1,6 @@
 """
-Market configuration and stock lists for different markets.
-Supports US and Indian NSE (Nifty 50) stocks.
+Market configuration and stock lists.
+Supports US market (S&P 500 Top 50 stocks).
 """
 
 from enum import Enum
@@ -10,91 +10,89 @@ from typing import Optional
 class Market(Enum):
     """Supported markets."""
     US = "us"
-    INDIA_NSE = "india_nse"
 
 
-# Nifty 50 stocks with company names
-NIFTY_50_STOCKS = {
-    "RELIANCE": "Reliance Industries Ltd",
-    "TCS": "Tata Consultancy Services Ltd",
-    "HDFCBANK": "HDFC Bank Ltd",
-    "INFY": "Infosys Ltd",
-    "ICICIBANK": "ICICI Bank Ltd",
-    "HINDUNILVR": "Hindustan Unilever Ltd",
-    "ITC": "ITC Ltd",
-    "SBIN": "State Bank of India",
-    "BHARTIARTL": "Bharti Airtel Ltd",
-    "KOTAKBANK": "Kotak Mahindra Bank Ltd",
-    "LT": "Larsen & Toubro Ltd",
-    "AXISBANK": "Axis Bank Ltd",
-    "ASIANPAINT": "Asian Paints Ltd",
-    "MARUTI": "Maruti Suzuki India Ltd",
-    "HCLTECH": "HCL Technologies Ltd",
-    "SUNPHARMA": "Sun Pharmaceutical Industries Ltd",
-    "TITAN": "Titan Company Ltd",
-    "BAJFINANCE": "Bajaj Finance Ltd",
-    "WIPRO": "Wipro Ltd",
-    "ULTRACEMCO": "UltraTech Cement Ltd",
-    "NESTLEIND": "Nestle India Ltd",
-    "NTPC": "NTPC Ltd",
-    "POWERGRID": "Power Grid Corporation of India Ltd",
-    "M&M": "Mahindra & Mahindra Ltd",
-    "TATAMOTORS": "Tata Motors Ltd",
-    "ONGC": "Oil & Natural Gas Corporation Ltd",
-    "JSWSTEEL": "JSW Steel Ltd",
-    "TATASTEEL": "Tata Steel Ltd",
-    "ADANIENT": "Adani Enterprises Ltd",
-    "ADANIPORTS": "Adani Ports and SEZ Ltd",
-    "COALINDIA": "Coal India Ltd",
-    "BAJAJFINSV": "Bajaj Finserv Ltd",
-    "TECHM": "Tech Mahindra Ltd",
-    "HDFCLIFE": "HDFC Life Insurance Company Ltd",
-    "SBILIFE": "SBI Life Insurance Company Ltd",
-    "GRASIM": "Grasim Industries Ltd",
-    "DIVISLAB": "Divi's Laboratories Ltd",
-    "DRREDDY": "Dr. Reddy's Laboratories Ltd",
-    "CIPLA": "Cipla Ltd",
-    "BRITANNIA": "Britannia Industries Ltd",
-    "EICHERMOT": "Eicher Motors Ltd",
-    "APOLLOHOSP": "Apollo Hospitals Enterprise Ltd",
-    "INDUSINDBK": "IndusInd Bank Ltd",
-    "HEROMOTOCO": "Hero MotoCorp Ltd",
-    "TATACONSUM": "Tata Consumer Products Ltd",
-    "BPCL": "Bharat Petroleum Corporation Ltd",
-    "UPL": "UPL Ltd",
-    "HINDALCO": "Hindalco Industries Ltd",
-    "BAJAJ-AUTO": "Bajaj Auto Ltd",
-    "LTIM": "LTIMindtree Ltd",
+# S&P 500 Top 50 stocks by market cap with company names
+SP500_TOP_50_STOCKS = {
+    "AAPL": "Apple Inc.",
+    "MSFT": "Microsoft Corporation",
+    "NVDA": "NVIDIA Corporation",
+    "AMZN": "Amazon.com, Inc.",
+    "GOOGL": "Alphabet Inc.",
+    "META": "Meta Platforms, Inc.",
+    "BRK-B": "Berkshire Hathaway Inc.",
+    "AVGO": "Broadcom Inc.",
+    "LLY": "Eli Lilly and Company",
+    "JPM": "JPMorgan Chase & Co.",
+    "TSLA": "Tesla, Inc.",
+    "XOM": "Exxon Mobil Corporation",
+    "UNH": "UnitedHealth Group Incorporated",
+    "V": "Visa Inc.",
+    "MA": "Mastercard Incorporated",
+    "PG": "The Procter & Gamble Company",
+    "COST": "Costco Wholesale Corporation",
+    "JNJ": "Johnson & Johnson",
+    "HD": "The Home Depot, Inc.",
+    "ABBV": "AbbVie Inc.",
+    "WMT": "Walmart Inc.",
+    "NFLX": "Netflix, Inc.",
+    "CRM": "Salesforce, Inc.",
+    "BAC": "Bank of America Corporation",
+    "ORCL": "Oracle Corporation",
+    "CVX": "Chevron Corporation",
+    "MRK": "Merck & Co., Inc.",
+    "KO": "The Coca-Cola Company",
+    "AMD": "Advanced Micro Devices, Inc.",
+    "CSCO": "Cisco Systems, Inc.",
+    "PEP": "PepsiCo, Inc.",
+    "ACN": "Accenture plc",
+    "TMO": "Thermo Fisher Scientific Inc.",
+    "LIN": "Linde plc",
+    "ADBE": "Adobe Inc.",
+    "MCD": "McDonald's Corporation",
+    "ABT": "Abbott Laboratories",
+    "WFC": "Wells Fargo & Company",
+    "GE": "GE Aerospace",
+    "IBM": "International Business Machines Corporation",
+    "DHR": "Danaher Corporation",
+    "QCOM": "QUALCOMM Incorporated",
+    "CAT": "Caterpillar Inc.",
+    "INTU": "Intuit Inc.",
+    "DIS": "The Walt Disney Company",
+    "AMAT": "Applied Materials, Inc.",
+    "TXN": "Texas Instruments Incorporated",
+    "NOW": "ServiceNow, Inc.",
+    "PM": "Philip Morris International Inc.",
+    "GS": "The Goldman Sachs Group, Inc.",
 }
 
 
-def is_nifty_50_stock(symbol: str) -> bool:
+def is_sp500_top50_stock(symbol: str) -> bool:
     """
-    Check if a symbol is a Nifty 50 stock.
+    Check if a symbol is an S&P 500 Top 50 stock.
 
     Args:
-        symbol: Stock symbol (with or without .NS suffix)
+        symbol: Stock symbol
 
     Returns:
-        True if the symbol is in the Nifty 50 list
+        True if the symbol is in the S&P 500 Top 50 list
     """
-    # Remove .NS suffix if present
-    clean_symbol = symbol.upper().replace(".NS", "")
-    return clean_symbol in NIFTY_50_STOCKS
+    clean_symbol = symbol.upper()
+    return clean_symbol in SP500_TOP_50_STOCKS
 
 
-def get_nifty_50_company_name(symbol: str) -> Optional[str]:
+def get_sp500_top50_company_name(symbol: str) -> Optional[str]:
     """
-    Get the company name for a Nifty 50 stock symbol.
+    Get the company name for an S&P 500 Top 50 stock symbol.
 
     Args:
-        symbol: Stock symbol (with or without .NS suffix)
+        symbol: Stock symbol
 
     Returns:
         Company name if found, None otherwise
     """
-    clean_symbol = symbol.upper().replace(".NS", "")
-    return NIFTY_50_STOCKS.get(clean_symbol)
+    clean_symbol = symbol.upper()
+    return SP500_TOP_50_STOCKS.get(clean_symbol)
 
 
 def detect_market(symbol: str, config_market: str = "auto") -> Market:
@@ -103,26 +101,11 @@ def detect_market(symbol: str, config_market: str = "auto") -> Market:
 
     Args:
         symbol: Stock symbol
-        config_market: Market setting from config ("auto", "us", "india_nse")
+        config_market: Market setting from config ("auto", "us")
 
     Returns:
         Market enum indicating the detected market
     """
-    if config_market == "india_nse":
-        return Market.INDIA_NSE
-    elif config_market == "us":
-        return Market.US
-
-    # Auto-detection
-    # Check if symbol has .NS suffix (yfinance format for NSE)
-    if symbol.upper().endswith(".NS"):
-        return Market.INDIA_NSE
-
-    # Check if symbol is in Nifty 50 list
-    if is_nifty_50_stock(symbol):
-        return Market.INDIA_NSE
-
-    # Default to US market
     return Market.US
 
 
@@ -132,41 +115,29 @@ def normalize_symbol(symbol: str, target: str = "yfinance") -> str:
 
     Args:
         symbol: Stock symbol
-        target: Target format ("yfinance", "jugaad", "nse")
+        target: Target format ("yfinance")
 
     Returns:
         Normalized symbol for the target
     """
-    clean_symbol = symbol.upper().replace(".NS", "")
-
-    if target == "yfinance":
-        # yfinance requires .NS suffix for NSE stocks
-        if is_nifty_50_stock(clean_symbol):
-            return f"{clean_symbol}.NS"
-        return clean_symbol
-
-    elif target in ("jugaad", "nse"):
-        # jugaad-data and NSE use symbols without suffix
-        return clean_symbol
-
     return symbol.upper()
 
 
-def get_nifty_50_list() -> list:
+def get_sp500_top50_list() -> list:
     """
-    Get list of all Nifty 50 stock symbols.
+    Get list of all S&P 500 Top 50 stock symbols.
 
     Returns:
-        List of Nifty 50 stock symbols
+        List of S&P 500 Top 50 stock symbols
     """
-    return list(NIFTY_50_STOCKS.keys())
+    return list(SP500_TOP_50_STOCKS.keys())
 
 
-def get_nifty_50_with_names() -> dict:
+def get_sp500_top50_with_names() -> dict:
     """
-    Get dictionary of Nifty 50 stocks with company names.
+    Get dictionary of S&P 500 Top 50 stocks with company names.
 
     Returns:
         Dictionary mapping symbols to company names
     """
-    return NIFTY_50_STOCKS.copy()
+    return SP500_TOP_50_STOCKS.copy()

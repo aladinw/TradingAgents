@@ -29,3 +29,6 @@ def get_config() -> Dict:
 
 # Initialize with default config
 initialize_config()
+
+# Convenience constant used by dataflow modules
+DATA_DIR = get_config().get("data_dir", "./data")

@@ -292,7 +292,7 @@ class ApiService {
   }
 
   /**
-   * Start bulk analysis for all Nifty 50 stocks
+   * Start bulk analysis for all S&P 500 Top 50 stocks
    */
   async runBulkAnalysis(date?: string, config?: {
     deep_think_model?: string;
@@ -391,24 +391,24 @@ class ApiService {
     return this.fetch(`/stocks/${symbol}/prices?days=${days}`);
   }
 
-  // ============== Nifty50 Index Methods ==============
+  // ============== S&P 500 Index Methods ==============
 
   /**
-   * Get Nifty50 index closing prices for recommendation date range
+   * Get S&P 500 index closing prices for recommendation date range
    */
-  async getNifty50History(): Promise<{
+  async getSP500History(): Promise<{
     dates: string[];
     prices: Record<string, number>;
     error?: string;
   }> {
-    return this.fetch('/nifty50/history');
+    return this.fetch('/sp500/history');
   }
 
   // ============== History Bundle ==============
 
   /**
    * Get all data the History page needs in a single call.
-   * Returns recommendations + all backtest results + accuracy metrics + nifty50 prices.
+   * Returns recommendations + all backtest results + accuracy metrics + S&P 500 prices.
    */
   async getHistoryBundle(): Promise<{
     recommendations: DailyRecommendation[];
@@ -428,7 +428,7 @@ class ApiService {
       by_decision: Record<string, { accuracy: number; total: number; correct: number }>;
       by_confidence: Record<string, { accuracy: number; total: number; correct: number }>;
     };
-    nifty50_prices: Record<string, number>;
+    sp500_prices: Record<string, number>;
   }> {
     return this.fetch('/history/bundle');
   }

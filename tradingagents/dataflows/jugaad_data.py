@@ -12,7 +12,7 @@ from datetime import datetime, date
 import pandas as pd
 import signal
 
-from .markets import normalize_symbol, is_nifty_50_stock
+from .markets import normalize_symbol
 
 
 class JugaadDataTimeoutError(Exception):

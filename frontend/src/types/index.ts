@@ -139,14 +139,14 @@ export interface StockHistory {
   };
 }
 
-export interface NiftyStock {
+export interface SP500Stock {
   symbol: string;
   company_name: string;
   sector?: string;
 }
 
-// Nifty50 Index data point
-export interface Nifty50IndexPoint {
+// S&P 500 Index data point
+export interface SP500IndexPoint {
   date: string;
   value: number;
   return: number; // daily return %
@@ -206,55 +206,55 @@ export interface CumulativeReturnPoint {
   indexReturn: number;
 }
 
-export const NIFTY_50_STOCKS: NiftyStock[] = [
-  { symbol: 'RELIANCE', company_name: 'Reliance Industries Ltd', sector: 'Energy' },
-  { symbol: 'TCS', company_name: 'Tata Consultancy Services Ltd', sector: 'IT' },
-  { symbol: 'HDFCBANK', company_name: 'HDFC Bank Ltd', sector: 'Banking' },
-  { symbol: 'INFY', company_name: 'Infosys Ltd', sector: 'IT' },
-  { symbol: 'ICICIBANK', company_name: 'ICICI Bank Ltd', sector: 'Banking' },
-  { symbol: 'HINDUNILVR', company_name: 'Hindustan Unilever Ltd', sector: 'FMCG' },
-  { symbol: 'ITC', company_name: 'ITC Ltd', sector: 'FMCG' },
-  { symbol: 'SBIN', company_name: 'State Bank of India', sector: 'Banking' },
-  { symbol: 'BHARTIARTL', company_name: 'Bharti Airtel Ltd', sector: 'Telecom' },
-  { symbol: 'KOTAKBANK', company_name: 'Kotak Mahindra Bank Ltd', sector: 'Banking' },
-  { symbol: 'LT', company_name: 'Larsen & Toubro Ltd', sector: 'Infrastructure' },
-  { symbol: 'AXISBANK', company_name: 'Axis Bank Ltd', sector: 'Banking' },
-  { symbol: 'ASIANPAINT', company_name: 'Asian Paints Ltd', sector: 'Consumer' },
-  { symbol: 'MARUTI', company_name: 'Maruti Suzuki India Ltd', sector: 'Auto' },
-  { symbol: 'HCLTECH', company_name: 'HCL Technologies Ltd', sector: 'IT' },
-  { symbol: 'SUNPHARMA', company_name: 'Sun Pharmaceutical Industries Ltd', sector: 'Pharma' },
-  { symbol: 'TITAN', company_name: 'Titan Company Ltd', sector: 'Consumer' },
-  { symbol: 'BAJFINANCE', company_name: 'Bajaj Finance Ltd', sector: 'Finance' },
-  { symbol: 'WIPRO', company_name: 'Wipro Ltd', sector: 'IT' },
-  { symbol: 'ULTRACEMCO', company_name: 'UltraTech Cement Ltd', sector: 'Cement' },
-  { symbol: 'NESTLEIND', company_name: 'Nestle India Ltd', sector: 'FMCG' },
-  { symbol: 'NTPC', company_name: 'NTPC Ltd', sector: 'Power' },
-  { symbol: 'POWERGRID', company_name: 'Power Grid Corporation of India Ltd', sector: 'Power' },
-  { symbol: 'M&M', company_name: 'Mahindra & Mahindra Ltd', sector: 'Auto' },
-  { symbol: 'TATAMOTORS', company_name: 'Tata Motors Ltd', sector: 'Auto' },
-  { symbol: 'ONGC', company_name: 'Oil & Natural Gas Corporation Ltd', sector: 'Energy' },
-  { symbol: 'JSWSTEEL', company_name: 'JSW Steel Ltd', sector: 'Metals' },
-  { symbol: 'TATASTEEL', company_name: 'Tata Steel Ltd', sector: 'Metals' },
-  { symbol: 'ADANIENT', company_name: 'Adani Enterprises Ltd', sector: 'Conglomerate' },
-  { symbol: 'ADANIPORTS', company_name: 'Adani Ports and SEZ Ltd', sector: 'Infrastructure' },
-  { symbol: 'COALINDIA', company_name: 'Coal India Ltd', sector: 'Mining' },
-  { symbol: 'BAJAJFINSV', company_name: 'Bajaj Finserv Ltd', sector: 'Finance' },
-  { symbol: 'TECHM', company_name: 'Tech Mahindra Ltd', sector: 'IT' },
-  { symbol: 'HDFCLIFE', company_name: 'HDFC Life Insurance Company Ltd', sector: 'Insurance' },
-  { symbol: 'SBILIFE', company_name: 'SBI Life Insurance Company Ltd', sector: 'Insurance' },
-  { symbol: 'GRASIM', company_name: 'Grasim Industries Ltd', sector: 'Cement' },
-  { symbol: 'DIVISLAB', company_name: "Divi's Laboratories Ltd", sector: 'Pharma' },
-  { symbol: 'DRREDDY', company_name: "Dr. Reddy's Laboratories Ltd", sector: 'Pharma' },
-  { symbol: 'CIPLA', company_name: 'Cipla Ltd', sector: 'Pharma' },
-  { symbol: 'BRITANNIA', company_name: 'Britannia Industries Ltd', sector: 'FMCG' },
-  { symbol: 'EICHERMOT', company_name: 'Eicher Motors Ltd', sector: 'Auto' },
-  { symbol: 'APOLLOHOSP', company_name: 'Apollo Hospitals Enterprise Ltd', sector: 'Healthcare' },
-  { symbol: 'INDUSINDBK', company_name: 'IndusInd Bank Ltd', sector: 'Banking' },
-  { symbol: 'HEROMOTOCO', company_name: 'Hero MotoCorp Ltd', sector: 'Auto' },
-  { symbol: 'TATACONSUM', company_name: 'Tata Consumer Products Ltd', sector: 'FMCG' },
-  { symbol: 'BPCL', company_name: 'Bharat Petroleum Corporation Ltd', sector: 'Energy' },
-  { symbol: 'UPL', company_name: 'UPL Ltd', sector: 'Chemicals' },
-  { symbol: 'HINDALCO', company_name: 'Hindalco Industries Ltd', sector: 'Metals' },
-  { symbol: 'BAJAJ-AUTO', company_name: 'Bajaj Auto Ltd', sector: 'Auto' },
-  { symbol: 'LTIM', company_name: 'LTIMindtree Ltd', sector: 'IT' },
+export const SP500_TOP_50_STOCKS: SP500Stock[] = [
+  { symbol: 'AAPL', company_name: 'Apple Inc.', sector: 'Technology' },
+  { symbol: 'MSFT', company_name: 'Microsoft Corporation', sector: 'Technology' },
+  { symbol: 'NVDA', company_name: 'NVIDIA Corporation', sector: 'Technology' },
+  { symbol: 'AMZN', company_name: 'Amazon.com, Inc.', sector: 'Consumer Discretionary' },
+  { symbol: 'GOOGL', company_name: 'Alphabet Inc.', sector: 'Communication Services' },
+  { symbol: 'META', company_name: 'Meta Platforms, Inc.', sector: 'Communication Services' },
+  { symbol: 'BRK-B', company_name: 'Berkshire Hathaway Inc.', sector: 'Financials' },
+  { symbol: 'AVGO', company_name: 'Broadcom Inc.', sector: 'Technology' },
+  { symbol: 'LLY', company_name: 'Eli Lilly and Company', sector: 'Healthcare' },
+  { symbol: 'JPM', company_name: 'JPMorgan Chase & Co.', sector: 'Financials' },
+  { symbol: 'TSLA', company_name: 'Tesla, Inc.', sector: 'Consumer Discretionary' },
+  { symbol: 'XOM', company_name: 'Exxon Mobil Corporation', sector: 'Energy' },
+  { symbol: 'UNH', company_name: 'UnitedHealth Group Incorporated', sector: 'Healthcare' },
+  { symbol: 'V', company_name: 'Visa Inc.', sector: 'Financials' },
+  { symbol: 'MA', company_name: 'Mastercard Incorporated', sector: 'Financials' },
+  { symbol: 'PG', company_name: 'The Procter & Gamble Company', sector: 'Consumer Staples' },
+  { symbol: 'COST', company_name: 'Costco Wholesale Corporation', sector: 'Consumer Staples' },
+  { symbol: 'JNJ', company_name: 'Johnson & Johnson', sector: 'Healthcare' },
+  { symbol: 'HD', company_name: 'The Home Depot, Inc.', sector: 'Consumer Discretionary' },
+  { symbol: 'ABBV', company_name: 'AbbVie Inc.', sector: 'Healthcare' },
+  { symbol: 'WMT', company_name: 'Walmart Inc.', sector: 'Consumer Staples' },
+  { symbol: 'NFLX', company_name: 'Netflix, Inc.', sector: 'Communication Services' },
+  { symbol: 'CRM', company_name: 'Salesforce, Inc.', sector: 'Technology' },
+  { symbol: 'BAC', company_name: 'Bank of America Corporation', sector: 'Financials' },
+  { symbol: 'ORCL', company_name: 'Oracle Corporation', sector: 'Technology' },
+  { symbol: 'CVX', company_name: 'Chevron Corporation', sector: 'Energy' },
+  { symbol: 'MRK', company_name: 'Merck & Co., Inc.', sector: 'Healthcare' },
+  { symbol: 'KO', company_name: 'The Coca-Cola Company', sector: 'Consumer Staples' },
+  { symbol: 'AMD', company_name: 'Advanced Micro Devices, Inc.', sector: 'Technology' },
+  { symbol: 'CSCO', company_name: 'Cisco Systems, Inc.', sector: 'Technology' },
+  { symbol: 'PEP', company_name: 'PepsiCo, Inc.', sector: 'Consumer Staples' },
+  { symbol: 'ACN', company_name: 'Accenture plc', sector: 'Technology' },
+  { symbol: 'TMO', company_name: 'Thermo Fisher Scientific Inc.', sector: 'Healthcare' },
+  { symbol: 'LIN', company_name: 'Linde plc', sector: 'Materials' },
+  { symbol: 'ADBE', company_name: 'Adobe Inc.', sector: 'Technology' },
+  { symbol: 'MCD', company_name: "McDonald's Corporation", sector: 'Consumer Discretionary' },
+  { symbol: 'ABT', company_name: 'Abbott Laboratories', sector: 'Healthcare' },
+  { symbol: 'WFC', company_name: 'Wells Fargo & Company', sector: 'Financials' },
+  { symbol: 'GE', company_name: 'GE Aerospace', sector: 'Industrials' },
+  { symbol: 'IBM', company_name: 'International Business Machines Corporation', sector: 'Technology' },
+  { symbol: 'DHR', company_name: 'Danaher Corporation', sector: 'Healthcare' },
+  { symbol: 'QCOM', company_name: 'QUALCOMM Incorporated', sector: 'Technology' },
+  { symbol: 'CAT', company_name: 'Caterpillar Inc.', sector: 'Industrials' },
+  { symbol: 'INTU', company_name: 'Intuit Inc.', sector: 'Technology' },
+  { symbol: 'DIS', company_name: 'The Walt Disney Company', sector: 'Communication Services' },
+  { symbol: 'AMAT', company_name: 'Applied Materials, Inc.', sector: 'Technology' },
+  { symbol: 'TXN', company_name: 'Texas Instruments Incorporated', sector: 'Technology' },
+  { symbol: 'NOW', company_name: 'ServiceNow, Inc.', sector: 'Technology' },
+  { symbol: 'PM', company_name: 'Philip Morris International Inc.', sector: 'Consumer Staples' },
+  { symbol: 'GS', company_name: 'The Goldman Sachs Group, Inc.', sector: 'Financials' },
 ];

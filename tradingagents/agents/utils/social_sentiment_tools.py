@@ -47,7 +47,7 @@ def get_sector_performance(
     """
     Retrieve sector performance context for a ticker.
     Returns the stock's sector, its position vs moving averages, 52-week range,
-    beta, and relative performance vs Nifty50 index (for Indian stocks).
+    beta, and relative performance vs S&P 500 index.
     Args:
         ticker (str): Ticker symbol of the company
         curr_date (str): Current date you are trading at, yyyy-mm-dd

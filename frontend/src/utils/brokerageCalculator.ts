@@ -1,17 +1,15 @@
 /**
- * Zerodha Brokerage Calculator
- * Based on https://github.com/hemangjoshi37a/Zerodha-Brokerage-Calculator
+ * US Stock Trading Cost Calculator
  *
- * Implements accurate brokerage calculation for Indian equity markets
+ * Implements US equity trading cost estimation.
+ * Most major US brokers (Schwab, Fidelity, etc.) offer commission-free trading.
+ * Regulatory fees (SEC Fee, TAF Fee) still apply but are minimal.
  */
 
 export interface BrokerageBreakdown {
   brokerage: number;
-  stt: number;
-  exchangeCharges: number;
-  sebiCharges: number;
-  gst: number;
-  stampDuty: number;
+  secFee: number;
+  tafFee: number;
   totalCharges: number;
   netProfit: number;
   turnover: number;
@@ -24,124 +22,45 @@ export interface TradeDetails {
   tradeType: 'delivery' | 'intraday';
 }
 
-// Zerodha charge rates
+// US regulatory fee rates (as of 2024-2025)
 const RATES = {
-  // Equity Delivery
-  delivery: {
-    brokerage: 0, // Zero brokerage for delivery
-    sttBuy: 0.001, // 0.1% on buy
-    sttSell: 0.001, // 0.1% on sell
-    exchangeCharges: 0.0000345, // 0.00345%
-    sebiCharges: 0.000001, // 0.0001%
-    gst: 0.18, // 18%
-    stampDuty: 0.00015, // 0.015% on buy side
-  },
-  // Equity Intraday
-  intraday: {
-    brokerageRate: 0.0003, // 0.03%
-    brokerageCap: 20, // Max Rs. 20 per side
-    sttSell: 0.00025, // 0.025% on sell side only
-    exchangeCharges: 0.0000345, // 0.00345%
-    sebiCharges: 0.000001, // 0.0001%
-    gst: 0.18, // 18%
-    stampDuty: 0.00003, // 0.003% on buy side
-  },
+  // SEC Fee: charged on sell orders only
+  // Rate: $8.00 per $1,000,000 of principal (sell side)
+  secFeeRate: 0.000008, // $8 / $1,000,000
+  // TAF (Trading Activity Fee): charged on sell orders only
+  // Rate: $0.000166 per share (sell side), max $8.30 per trade
+  tafPerShare: 0.000166,
+  tafCap: 8.30,
 };
 
 /**
- * Calculate brokerage for a single trade
+ * Calculate trading costs for a single trade
  */
 export function calculateBrokerage(trade: TradeDetails): BrokerageBreakdown {
-  const { buyPrice, sellPrice, quantity, tradeType } = trade;
+  const { buyPrice, sellPrice, quantity } = trade;
   const buyValue = buyPrice * quantity;
   const sellValue = sellPrice * quantity;
   const turnover = buyValue + sellValue;
 
-  if (tradeType === 'delivery') {
-    return calculateDeliveryBrokerage(buyValue, sellValue, turnover);
-  } else {
-    return calculateIntradayBrokerage(buyValue, sellValue, turnover);
-  }
-}
-
-function calculateDeliveryBrokerage(
-  buyValue: number,
-  sellValue: number,
-  turnover: number
-): BrokerageBreakdown {
-  const rates = RATES.delivery;
-
-  // Brokerage is zero for delivery
+  // Commission-free (most US brokers)
   const brokerage = 0;
 
-  // STT on both buy and sell
-  const stt = (buyValue * rates.sttBuy) + (sellValue * rates.sttSell);
+  // SEC Fee on sell value only
+  const secFee = Math.round(sellValue * RATES.secFeeRate * 100) / 100;
 
-  // Exchange transaction charges on turnover
-  const exchangeCharges = turnover * rates.exchangeCharges;
+  // TAF Fee on sell shares only
+  const tafFee = Math.min(
+    Math.round(quantity * RATES.tafPerShare * 100) / 100,
+    RATES.tafCap
+  );
 
-  // SEBI charges on turnover
-  const sebiCharges = turnover * rates.sebiCharges;
-
-  // GST on brokerage + exchange charges
-  const gst = (brokerage + exchangeCharges) * rates.gst;
-
-  // Stamp duty on buy side only
-  const stampDuty = buyValue * rates.stampDuty;
-
-  const totalCharges = brokerage + stt + exchangeCharges + sebiCharges + gst + stampDuty;
+  const totalCharges = brokerage + secFee + tafFee;
   const netProfit = sellValue - buyValue - totalCharges;
 
   return {
     brokerage,
-    stt,
-    exchangeCharges,
-    sebiCharges,
-    gst,
-    stampDuty,
-    totalCharges,
-    netProfit,
-    turnover,
-  };
-}
-
-function calculateIntradayBrokerage(
-  buyValue: number,
-  sellValue: number,
-  turnover: number
-): BrokerageBreakdown {
-  const rates = RATES.intraday;
-
-  // Brokerage: min(0.03% * value, Rs. 20) per side
-  const buyBrokerage = Math.min(buyValue * rates.brokerageRate, rates.brokerageCap);
-  const sellBrokerage = Math.min(sellValue * rates.brokerageRate, rates.brokerageCap);
-  const brokerage = buyBrokerage + sellBrokerage;
-
-  // STT on sell side only for intraday
-  const stt = sellValue * rates.sttSell;
-
-  // Exchange transaction charges on turnover
-  const exchangeCharges = turnover * rates.exchangeCharges;
-
-  // SEBI charges on turnover
-  const sebiCharges = turnover * rates.sebiCharges;
-
-  // GST on brokerage + exchange charges
-  const gst = (brokerage + exchangeCharges) * rates.gst;
-
-  // Stamp duty on buy side only
-  const stampDuty = buyValue * rates.stampDuty;
-
-  const totalCharges = brokerage + stt + exchangeCharges + sebiCharges + gst + stampDuty;
-  const netProfit = sellValue - buyValue - totalCharges;
-
-  return {
-    brokerage,
-    stt,
-    exchangeCharges,
-    sebiCharges,
-    gst,
-    stampDuty,
+    secFee,
+    tafFee,
     totalCharges,
     netProfit,
     turnover,
@@ -149,7 +68,7 @@ function calculateIntradayBrokerage(
 }
 
 /**
- * Calculate total brokerage for multiple trades
+ * Calculate total costs for multiple trades
  */
 export function calculateTotalBrokerage(
   trades: TradeDetails[]
@@ -159,11 +78,8 @@ export function calculateTotalBrokerage(
 } {
   const totals: BrokerageBreakdown = {
     brokerage: 0,
-    stt: 0,
-    exchangeCharges: 0,
-    sebiCharges: 0,
-    gst: 0,
-    stampDuty: 0,
+    secFee: 0,
+    tafFee: 0,
     totalCharges: 0,
     netProfit: 0,
     turnover: 0,
@@ -172,11 +88,8 @@ export function calculateTotalBrokerage(
   for (const trade of trades) {
     const result = calculateBrokerage(trade);
     totals.brokerage += result.brokerage;
-    totals.stt += result.stt;
-    totals.exchangeCharges += result.exchangeCharges;
-    totals.sebiCharges += result.sebiCharges;
-    totals.gst += result.gst;
-    totals.stampDuty += result.stampDuty;
+    totals.secFee += result.secFee;
+    totals.tafFee += result.tafFee;
     totals.totalCharges += result.totalCharges;
     totals.netProfit += result.netProfit;
     totals.turnover += result.turnover;
@@ -190,7 +103,6 @@ export function calculateTotalBrokerage(
 
 /**
  * Quick estimate for a round-trip delivery trade
- * (buy and later sell the same quantity)
  */
 export function estimateDeliveryCharges(
   buyPrice: number,
@@ -222,12 +134,12 @@ export function estimateIntradayCharges(
 }
 
 /**
- * Format currency in Indian format
+ * Format currency in USD
  */
-export function formatINR(value: number, decimals: number = 2): string {
-  return new Intl.NumberFormat('en-IN', {
+export function formatUSD(value: number, decimals: number = 2): string {
+  return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: 'INR',
+    currency: 'USD',
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(value);
