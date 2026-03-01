@@ -1,5 +1,5 @@
-import { useParams, Link } from 'react-router-dom';
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import {
   ArrowLeft, Building2, TrendingUp, TrendingDown, Minus, AlertTriangle,
   Calendar, Activity, LineChart, Database, MessageSquare, Layers,
@@ -49,6 +49,10 @@ type TabType = 'overview' | 'pipeline' | 'debates' | 'data';
 
 export default function StockDetail() {
   const { symbol } = useParams<{ symbol: string }>();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const taskId = searchParams.get('task_id');
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(taskId);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [pipelineData, setPipelineData] = useState<FullPipelineData | null>(null);
   const [isLoadingPipeline, setIsLoadingPipeline] = useState(false);
@@ -62,6 +66,8 @@ export default function StockDetail() {
   const [analysisStatus, setAnalysisStatus] = useState<string | null>(null);
   const [analysisProgress, setAnalysisProgress] = useState<string | null>(null);
   const [analysisSteps, setAnalysisSteps] = useState<{ completed: number; total: number } | null>(null);
+  const analysisPollIntervalRef = useRef<number | null>(null);
+  const analysisPollTimeoutRef = useRef<number | null>(null);
 
   const stock = SP500_TOP_50_STOCKS.find(s => s.symbol === symbol);
 
@@ -73,18 +79,36 @@ export default function StockDetail() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch latest recommendation from API
-        const rec = await api.getLatestRecommendation();
+        let rec: DailyRecommendation | null = null;
+
+        if (taskId) {
+          // Task-scoped mode: only read this task's recommendation
+          // Do not fall back to global latest to avoid cross-task data mixing
+          rec = await api.getTaskRecommendation(taskId);
+        } else {
+          rec = await api.getLatestRecommendation();
+        }
+
         if (rec && rec.analysis && Object.keys(rec.analysis).length > 0) {
           setLatestRecommendation(rec);
           setAnalysis(rec.analysis[symbol || '']);
+          if (rec.task_id) {
+            setActiveTaskId(rec.task_id);
+          }
         }
       } catch (err) {
-        console.error('Failed to fetch recommendation:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('404')) {
+          // No recommendation payload yet for current scope (task or latest).
+          setLatestRecommendation(null);
+          setAnalysis(undefined);
+        } else {
+          console.error('Failed to fetch recommendation:', err);
+        }
       }
 
       try {
-        // Fetch stock history from API
+        // Fetch stock history from API (global history remains date-based)
         const historyData = await api.getStockHistory(symbol || '');
         if (historyData && historyData.history && historyData.history.length > 0) {
           setHistory(historyData.history);
@@ -96,7 +120,7 @@ export default function StockDetail() {
     };
 
     fetchData();
-  }, [symbol]);
+  }, [symbol, taskId]);
 
   // State for real backtest data from API
   const [backtestResults, setBacktestResults] = useState<BacktestResult[]>([]);
@@ -112,7 +136,7 @@ export default function StockDetail() {
 
     for (const entry of history) {
       try {
-        const backtest = await api.getBacktestResult(entry.date, symbol);
+        const backtest = await api.getBacktestResult(entry.date, symbol, activeTaskId || undefined);
 
         if (backtest.available) {
           // Use hold-period return when available (BUY/HOLD with hold_days), else 1-day return
@@ -169,7 +193,7 @@ export default function StockDetail() {
 
     setBacktestResults(results);
     setIsLoadingBacktest(false);
-  }, [symbol, history]);
+  }, [symbol, history, activeTaskId]);
 
   // Fetch backtest data when symbol changes
   useEffect(() => {
@@ -225,6 +249,23 @@ export default function StockDetail() {
   // Real price history from API
   const [realPriceHistory, setRealPriceHistory] = useState<Array<{ date: string; price: number }>>([]);
   const [isLoadingPrices, setIsLoadingPrices] = useState(false);
+
+  useEffect(() => {
+    setActiveTaskId(taskId);
+  }, [taskId]);
+
+  useEffect(() => {
+    return () => {
+      if (analysisPollIntervalRef.current !== null) {
+        window.clearInterval(analysisPollIntervalRef.current);
+        analysisPollIntervalRef.current = null;
+      }
+      if (analysisPollTimeoutRef.current !== null) {
+        window.clearTimeout(analysisPollTimeoutRef.current);
+        analysisPollTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Fetch real price history from yfinance via backend
   useEffect(() => {
@@ -294,7 +335,10 @@ export default function StockDetail() {
     }
 
     try {
-      const data = await api.getPipelineData(latestRecommendation.date, symbol, forceRefresh);
+      const data = activeTaskId
+        ? await api.getTaskPipelineData(activeTaskId, symbol, forceRefresh)
+        : await api.getPipelineData(latestRecommendation.date, symbol, forceRefresh);
+
       setPipelineData(data);
       if (forceRefresh) {
         setLastRefresh(new Date().toLocaleTimeString());
@@ -329,7 +373,7 @@ export default function StockDetail() {
   useEffect(() => {
     if (activeTab === 'overview') return; // Don't fetch for overview tab
     fetchPipelineData();
-  }, [symbol, latestRecommendation?.date, activeTab]);
+  }, [symbol, latestRecommendation?.date, activeTab, activeTaskId]);
 
   // Refresh handler
   const handleRefresh = async () => {
@@ -373,7 +417,7 @@ export default function StockDetail() {
 
     try {
       // Trigger analysis with settings from context
-      await api.runAnalysis(symbol, latestRecommendation.date, {
+      const runResp = await api.runAnalysis(symbol, latestRecommendation.date, {
         deep_think_model: settings.deepThinkModel,
         quick_think_model: settings.quickThinkModel,
         provider: settings.provider,
@@ -382,13 +426,32 @@ export default function StockDetail() {
       });
       setAnalysisStatus('running');
 
+      const currentRunTaskId = runResp.task_id || null;
+      if (currentRunTaskId) {
+        setActiveTaskId(currentRunTaskId);
+        navigate(`/stock/${symbol}?task_id=${encodeURIComponent(currentRunTaskId)}`, { replace: true });
+      }
+
+      // Stop any previous polling loop before starting a new one
+      if (analysisPollIntervalRef.current !== null) {
+        window.clearInterval(analysisPollIntervalRef.current);
+        analysisPollIntervalRef.current = null;
+      }
+      if (analysisPollTimeoutRef.current !== null) {
+        window.clearTimeout(analysisPollTimeoutRef.current);
+        analysisPollTimeoutRef.current = null;
+      }
+
       // Track poll count for periodic full data refresh
       let pollCount = 0;
 
       // Poll for status
-      const pollInterval = setInterval(async () => {
+      const pollInterval = window.setInterval(async () => {
         try {
-          const status = await api.getAnalysisStatus(symbol);
+          const status = currentRunTaskId
+            ? await api.getAnalysisStatusByTask(currentRunTaskId)
+            : await api.getAnalysisStatus(symbol);
+
           setAnalysisProgress(status.progress || 'Processing...');
 
           // Update step counts for progress indicator
@@ -424,7 +487,9 @@ export default function StockDetail() {
           pollCount++;
           if (pollCount % 5 === 0) {
             try {
-              const fullData = await api.getPipelineData(latestRecommendation.date, symbol, true);
+              const fullData = currentRunTaskId
+                ? await api.getTaskPipelineData(currentRunTaskId, symbol, true)
+                : await api.getPipelineData(latestRecommendation.date, symbol, true);
               if (fullData && (fullData.agent_reports || fullData.debates)) {
                 setPipelineData(prev => ({
                   ...prev!,
@@ -441,13 +506,16 @@ export default function StockDetail() {
           }
 
           if (status.status === 'completed') {
-            clearInterval(pollInterval);
+            window.clearInterval(pollInterval);
+            analysisPollIntervalRef.current = null;
             setIsAnalysisRunning(false);
             setAnalysisStatus('completed');
             setAnalysisProgress(`Analysis complete: ${status.decision || 'Done'}`);
             // Refresh recommendation and pipeline data to show final results
             try {
-              const rec = await api.getLatestRecommendation();
+              const rec = currentRunTaskId
+                ? await api.getTaskRecommendation(currentRunTaskId)
+                : await api.getLatestRecommendation();
               if (rec && rec.analysis && Object.keys(rec.analysis).length > 0) {
                 setLatestRecommendation(rec);
                 setAnalysis(rec.analysis[symbol || '']);
@@ -464,13 +532,15 @@ export default function StockDetail() {
               setAnalysisStatus(null);
               setAnalysisSteps(null);
             }, 5000);
-          } else if (status.status === 'error') {
-            clearInterval(pollInterval);
+          } else if (status.status === 'error' || status.status === 'failed') {
+            window.clearInterval(pollInterval);
+            analysisPollIntervalRef.current = null;
             setIsAnalysisRunning(false);
             setAnalysisStatus('error');
-            setAnalysisProgress(`Error: ${status.error}`);
+            setAnalysisProgress(`Error: ${status.error || 'Task failed'}`);
           } else if (status.status === 'cancelled') {
-            clearInterval(pollInterval);
+            window.clearInterval(pollInterval);
+            analysisPollIntervalRef.current = null;
             setIsAnalysisRunning(false);
             setAnalysisStatus('cancelled');
             setAnalysisProgress('Analysis cancelled');
@@ -485,8 +555,16 @@ export default function StockDetail() {
         }
       }, 2000); // Poll every 2 seconds
 
+      analysisPollIntervalRef.current = pollInterval;
+
       // Cleanup after 10 minutes max
-      setTimeout(() => clearInterval(pollInterval), 600000);
+      const timeoutId = window.setTimeout(() => {
+        if (analysisPollIntervalRef.current !== null) {
+          window.clearInterval(analysisPollIntervalRef.current);
+          analysisPollIntervalRef.current = null;
+        }
+      }, 600000);
+      analysisPollTimeoutRef.current = timeoutId;
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -528,7 +606,7 @@ export default function StockDetail() {
           <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-2">Stock Not Found</h2>
           <p className="text-gray-500 dark:text-gray-400 mb-4">The stock "{symbol}" was not found in S&P 500 Top 50.</p>
-          <Link to="/" className="btn-primary">
+          <Link to={activeTaskId ? `/?task_id=${encodeURIComponent(activeTaskId)}` : '/'} className="btn-primary">
             Back to Dashboard
           </Link>
         </div>
@@ -562,7 +640,7 @@ export default function StockDetail() {
     <div className="space-y-4">
       {/* Back Button */}
       <Link
-        to="/"
+        to={activeTaskId ? `/?task_id=${encodeURIComponent(activeTaskId)}` : '/'}
         className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-nifty-600 dark:hover:text-nifty-400 transition-colors"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
@@ -655,25 +733,32 @@ export default function StockDetail() {
           `}
           title="Run AI analysis for this stock"
         >
-          {isAnalysisRunning ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Play className="w-4 h-4" />
-          )}
-          {isAnalysisRunning ? 'Analyzing...' : 'Run Analysis'}
+          <span className="relative w-4 h-4">
+            <Loader2
+              className={`w-4 h-4 absolute inset-0 ${isAnalysisRunning ? 'animate-spin opacity-100' : 'opacity-0 pointer-events-none'}`}
+            />
+            <Play
+              className={`w-4 h-4 absolute inset-0 ${isAnalysisRunning ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+            />
+          </span>
+          <span>{isAnalysisRunning ? 'Analyzing...' : 'Run Analysis'}</span>
         </button>
 
-        {/* Cancel Analysis Button - only shown when analysis is running */}
-        {isAnalysisRunning && (
-          <button
-            onClick={handleCancelAnalysis}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50"
-            title="Cancel running analysis"
-          >
-            <Square className="w-3.5 h-3.5 fill-current" />
-            Cancel
-          </button>
-        )}
+        {/* Cancel Analysis Button */}
+        <button
+          onClick={handleCancelAnalysis}
+          disabled={!isAnalysisRunning}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+            isAnalysisRunning
+              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50'
+              : 'opacity-0 pointer-events-none w-0 p-0 overflow-hidden'
+          }`}
+          title="Cancel running analysis"
+          aria-hidden={!isAnalysisRunning}
+        >
+          <Square className="w-3.5 h-3.5 fill-current" />
+          Cancel
+        </button>
 
         {/* Refresh Button */}
         <button

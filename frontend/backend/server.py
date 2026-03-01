@@ -25,7 +25,10 @@ from tradingagents.log_utils import add_log, analysis_logs, log_lock, log_subscr
 # Track running analyses
 # NOTE: This is not thread-safe for production multi-worker deployments.
 # For production, use Redis or a database-backed job queue instead.
-running_analyses = {}  # {symbol: {"status": "running", "started_at": datetime, "progress": str}}
+running_analyses = {}  # {symbol: {task_id, date, status, started_at, completed_at, progress, ...}}
+
+# Track symbol by task_id for task-scoped polling/queries
+task_to_symbol = {}
 
 app = FastAPI(
     title="US Stocks AI API",
@@ -158,9 +161,38 @@ def _is_cancelled(symbol: str) -> bool:
     return running_analyses.get(symbol, {}).get("cancelled", False)
 
 
-def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
+def _get_status_by_task_id(task_id: str) -> Optional[dict]:
+    symbol = task_to_symbol.get(task_id)
+    if not symbol:
+        for sym, data in running_analyses.items():
+            if data.get("task_id") == task_id:
+                task_to_symbol[task_id] = sym
+                symbol = sym
+                break
+
+    if symbol and symbol in running_analyses:
+        return {"symbol": symbol, **running_analyses[symbol]}
+
+    task = db.get_task(task_id)
+    if not task:
+        return None
+
+    return {
+        "task_id": task_id,
+        "symbol": task.get("request_symbol"),
+        "date": task.get("analysis_date"),
+        "status": task.get("status"),
+        "started_at": task.get("started_at"),
+        "completed_at": task.get("completed_at"),
+        "progress": "",
+    }
+
+
+def run_analysis_task(task_id: str, symbol: str, date: str, analysis_config: dict = None):
     """Background task to run trading analysis for a stock."""
     global running_analyses
+
+    print(f"[TaskLifecycle] run_analysis_task entered | task_id={task_id} symbol={symbol} date={date}", flush=True)
 
     # Default config values
     if analysis_config is None:
@@ -173,12 +205,25 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
     max_debate_rounds = analysis_config.get("max_debate_rounds", 1)
 
     try:
+        task_to_symbol[task_id] = symbol
         running_analyses[symbol] = {
+            "task_id": task_id,
+            "date": date,
             "status": "initializing",
             "started_at": datetime.now().isoformat(),
             "progress": "Loading trading agents...",
             "cancelled": False,
         }
+
+        db.update_analysis_task_status(
+            task_id,
+            status="running",
+            started_at=running_analyses[symbol]["started_at"],
+            total=1,
+            completed=0,
+            failed=0,
+            skipped=0,
+        )
 
         add_log("info", "system", f"🚀 Starting analysis for {symbol} on {date}")
         add_log("info", "system", f"Config: deep_think={deep_think_model}, quick_think={quick_think_model}")
@@ -207,6 +252,14 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
             add_log("info", "system", f"Analysis for {symbol} was cancelled before starting")
             running_analyses[symbol]["status"] = "cancelled"
             running_analyses[symbol]["progress"] = "Analysis cancelled"
+            running_analyses[symbol]["completed_at"] = datetime.now().isoformat()
+            db.update_analysis_task_status(
+                task_id,
+                status="cancelled",
+                completed=0,
+                failed=1,
+                completed_at=running_analyses[symbol]["completed_at"],
+            )
             return
 
         running_analyses[symbol]["status"] = "running"
@@ -222,6 +275,14 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
             add_log("info", "system", f"Analysis for {symbol} was cancelled before graph execution")
             running_analyses[symbol]["status"] = "cancelled"
             running_analyses[symbol]["progress"] = "Analysis cancelled"
+            running_analyses[symbol]["completed_at"] = datetime.now().isoformat()
+            db.update_analysis_task_status(
+                task_id,
+                status="cancelled",
+                completed=0,
+                failed=1,
+                completed_at=running_analyses[symbol]["completed_at"],
+            )
             return
 
         running_analyses[symbol]["progress"] = f"Analyzing {symbol}..."
@@ -235,6 +296,14 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
             add_log("info", "system", f"Analysis for {symbol} was cancelled after completion — results discarded")
             running_analyses[symbol]["status"] = "cancelled"
             running_analyses[symbol]["progress"] = "Analysis cancelled (results discarded)"
+            running_analyses[symbol]["completed_at"] = datetime.now().isoformat()
+            db.update_analysis_task_status(
+                task_id,
+                status="cancelled",
+                completed=0,
+                failed=1,
+                completed_at=running_analyses[symbol]["completed_at"],
+            )
             return
 
         add_log("success", "system", f"✅ Analysis complete for {symbol}: {decision}")
@@ -256,7 +325,7 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
             "raw_analysis": raw_analysis,
             "hold_days": hold_days
         }
-        db.save_single_stock_analysis(date, symbol, analysis_data)
+        db.save_single_stock_analysis(date, symbol, analysis_data, task_id=task_id)
         add_log("info", "system", f"💾 Saved analysis for {symbol} to database")
 
         # Save agent reports and debate data to pipeline tables
@@ -275,7 +344,7 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
                 agent_reports["trader"] = {"report_content": final_state["trader_investment_plan"]}
 
             if agent_reports:
-                db.save_agent_reports_bulk(date, symbol, agent_reports)
+                db.save_agent_reports_bulk(date, symbol, agent_reports, task_id=task_id)
                 add_log("info", "system", f"💾 Saved {len(agent_reports)} agent reports for {symbol}")
 
             # Save investment debate
@@ -287,6 +356,7 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
                     bear_arguments=invest_debate.get("bear_history", ""),
                     judge_decision=invest_debate.get("judge_decision", ""),
                     full_history=invest_debate.get("history", ""),
+                    task_id=task_id,
                 )
 
             # Save risk debate
@@ -299,16 +369,23 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
                     neutral_arguments=risk_debate.get("neutral_history", ""),
                     judge_decision=risk_debate.get("judge_decision", ""),
                     full_history=risk_debate.get("history", ""),
+                    task_id=task_id,
                 )
 
         # Auto-update daily recommendation summary (counts, top_picks, stocks_to_avoid)
-        db.update_daily_recommendation_summary(date)
+        db.update_daily_recommendation_summary(date, task_id=task_id)
         add_log("info", "system", f"📊 Updated daily recommendation summary for {date}")
 
         # Auto-trigger backtest calculation for this stock
         try:
             import backtest_service as bt
-            bt_result = bt.calculate_and_save_backtest(date, symbol, analysis_data["decision"], analysis_data.get("hold_days"))
+            bt_result = bt.calculate_and_save_backtest(
+                date,
+                symbol,
+                analysis_data["decision"],
+                analysis_data.get("hold_days"),
+                task_id=task_id,
+            )
             if bt_result:
                 add_log("info", "system", f"📈 Backtest calculated for {symbol}: correct={bt_result.get('prediction_correct')}")
             else:
@@ -316,12 +393,23 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
         except Exception as bt_err:
             add_log("warning", "system", f"⚠️ Backtest calculation skipped for {symbol}: {bt_err}")
 
+        completed_at = datetime.now().isoformat()
         running_analyses[symbol] = {
+            "task_id": task_id,
+            "date": date,
             "status": "completed",
-            "completed_at": datetime.now().isoformat(),
+            "completed_at": completed_at,
             "progress": f"Analysis complete: {decision}",
             "decision": decision
         }
+        db.update_analysis_task_status(
+            task_id,
+            status="completed",
+            total=1,
+            completed=1,
+            failed=0,
+            completed_at=completed_at,
+        )
         # Clear per-symbol step progress after completion
         try:
             from tradingagents.log_utils import symbol_progress
@@ -332,11 +420,23 @@ def run_analysis_task(symbol: str, date: str, analysis_config: dict = None):
     except Exception as e:
         error_msg = str(e) if str(e) else f"{type(e).__name__}: No details provided"
         add_log("error", "system", f"❌ Error analyzing {symbol}: {error_msg}")
+        completed_at = datetime.now().isoformat()
         running_analyses[symbol] = {
+            "task_id": task_id,
+            "date": date,
             "status": "error",
+            "completed_at": completed_at,
             "error": error_msg,
             "progress": f"Error: {error_msg[:100]}"
         }
+        db.update_analysis_task_status(
+            task_id,
+            status="failed",
+            total=1,
+            completed=0,
+            failed=1,
+            completed_at=completed_at,
+        )
         import traceback
         print(f"Analysis error for {symbol}: {type(e).__name__}: {error_msg}")
         traceback.print_exc()
@@ -362,6 +462,134 @@ async def root():
             "POST /recommendations": "Save a new recommendation",
             "POST /pipeline": "Save pipeline data for a stock"
         }
+    }
+
+
+@app.get("/tasks")
+async def get_tasks(
+    limit: int = 50,
+    offset: int = 0,
+    status: Optional[str] = None,
+    task_type: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+):
+    """List analysis tasks with optional filtering."""
+    tasks = db.list_tasks(
+        limit=limit,
+        offset=offset,
+        status=status,
+        task_type=task_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return {
+        "tasks": tasks,
+        "count": len(tasks),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/tasks/{task_id}")
+async def get_task(task_id: str):
+    """Get details for one analysis task."""
+    task = db.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+    return task
+
+
+@app.get("/tasks/{task_id}/recommendation")
+async def get_task_recommendation(task_id: str):
+    """Get recommendation payload for a specific task.
+
+    For a newly created task, recommendation data may not exist yet while analysis
+    is still pending/running. In that case, return an empty recommendation payload
+    with the current task status instead of 404 so frontend polling stays stable.
+    """
+    task = db.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+
+    recommendation = db.get_recommendation_by_date(task_id=task_id)
+    if recommendation:
+        return recommendation
+
+    return {
+        "task_id": task_id,
+        "date": task.get("analysis_date"),
+        "analysis": {},
+        "summary": {
+            "total": 0,
+            "buy": 0,
+            "sell": 0,
+            "hold": 0,
+        },
+        "top_picks": [],
+        "stocks_to_avoid": [],
+        "status": task.get("status"),
+    }
+
+
+
+@app.get("/tasks/{task_id}/{symbol}/pipeline")
+async def get_task_pipeline_data(task_id: str, symbol: str):
+    """Get full pipeline data for a stock in a specific task."""
+    pipeline_data = db.get_full_pipeline_data(symbol=symbol.upper(), task_id=task_id)
+    has_data = (
+        pipeline_data.get('agent_reports') or
+        pipeline_data.get('debates') or
+        pipeline_data.get('pipeline_steps') or
+        pipeline_data.get('data_sources')
+    )
+
+    if not has_data:
+        return {
+            "task_id": task_id,
+            "symbol": symbol.upper(),
+            "agent_reports": {},
+            "debates": {},
+            "pipeline_steps": [],
+            "data_sources": [],
+            "status": "no_data"
+        }
+
+    return {**pipeline_data, "task_id": task_id, "status": "complete"}
+
+
+@app.get("/tasks/{task_id}/{symbol}/agents")
+async def get_task_agent_reports(task_id: str, symbol: str):
+    """Get agent reports for a stock in a specific task."""
+    reports = db.get_agent_reports(symbol=symbol.upper(), task_id=task_id)
+    return {
+        "task_id": task_id,
+        "symbol": symbol.upper(),
+        "reports": reports,
+        "count": len(reports)
+    }
+
+
+@app.get("/tasks/{task_id}/{symbol}/debates")
+async def get_task_debate_history(task_id: str, symbol: str):
+    """Get debate history for a stock in a specific task."""
+    debates = db.get_debate_history(symbol=symbol.upper(), task_id=task_id)
+    return {
+        "task_id": task_id,
+        "symbol": symbol.upper(),
+        "debates": debates
+    }
+
+
+@app.get("/tasks/{task_id}/{symbol}/data-sources")
+async def get_task_data_sources(task_id: str, symbol: str):
+    """Get data source logs for a stock in a specific task."""
+    logs = db.get_data_source_logs(symbol=symbol.upper(), task_id=task_id)
+    return {
+        "task_id": task_id,
+        "symbol": symbol.upper(),
+        "data_sources": logs,
+        "count": len(logs)
     }
 
 
@@ -663,35 +891,17 @@ async def run_bulk_analysis(request: Optional[BulkAnalysisRequest] = None, date:
         if request.parallel_workers is not None:
             parallel_workers = max(1, min(5, request.parallel_workers))
 
-    # Resume support: skip stocks already analyzed for this date
-    already_analyzed = set(db.get_analyzed_symbols_for_date(date))
-    symbols_to_analyze = [s for s in SP500_TOP_50_SYMBOLS if s not in already_analyzed]
-    skipped_count = len(already_analyzed)
-
-    # If all stocks are already analyzed, return immediately
-    if not symbols_to_analyze:
-        bulk_analysis_state = {
-            "status": "completed",
-            "total": 0,
-            "total_all": len(SP500_TOP_50_SYMBOLS),
-            "skipped": skipped_count,
-            "completed": 0,
-            "failed": 0,
-            "current_symbols": [],
-            "started_at": datetime.now().isoformat(),
-            "completed_at": datetime.now().isoformat(),
-            "results": {},
-            "parallel_workers": parallel_workers,
-            "cancelled": False
-        }
-        return {
-            "message": f"All {skipped_count} stocks already analyzed for {date}",
-            "date": date,
-            "total_stocks": 0,
-            "skipped": skipped_count,
-            "parallel_workers": parallel_workers,
-            "status": "completed"
-        }
+    symbols_to_analyze = list(SP500_TOP_50_SYMBOLS)
+    task_id = db.create_analysis_task(
+        task_type="bulk",
+        analysis_date=date,
+        config_json={**analysis_config, "parallel_workers": parallel_workers},
+        status="pending",
+        total=len(symbols_to_analyze),
+        completed=0,
+        failed=0,
+        skipped=0,
+    )
 
     def analyze_single_stock(symbol: str, analysis_date: str, config: dict) -> tuple:
         """Analyze a single stock and return (symbol, status, error)."""
@@ -700,7 +910,19 @@ async def run_bulk_analysis(request: Optional[BulkAnalysisRequest] = None, date:
             if bulk_analysis_state.get("cancelled"):
                 return (symbol, "cancelled", "Bulk analysis was cancelled")
 
-            run_analysis_task(symbol, analysis_date, config)
+            stock_task_id = db.create_analysis_task(
+                task_type="single",
+                analysis_date=analysis_date,
+                request_symbol=symbol,
+                config_json=config,
+                status="pending",
+                total=1,
+                completed=0,
+                failed=0,
+                skipped=0,
+            )
+
+            run_analysis_task(stock_task_id, symbol, analysis_date, config)
 
             # Wait for completion with timeout
             import time
@@ -711,11 +933,12 @@ async def run_bulk_analysis(request: Optional[BulkAnalysisRequest] = None, date:
                 if bulk_analysis_state.get("cancelled"):
                     return (symbol, "cancelled", "Bulk analysis was cancelled")
 
-                if symbol not in running_analyses:
+                status = _get_status_by_task_id(stock_task_id)
+                if not status:
                     return (symbol, "unknown", None)
-                status = running_analyses[symbol].get("status")
-                if status != "running" and status != "initializing":
-                    return (symbol, status, None)
+                state = status.get("status")
+                if state != "running" and state != "initializing":
+                    return (symbol, state, None)
                 time.sleep(2)
                 waited += 2
 
@@ -727,20 +950,32 @@ async def run_bulk_analysis(request: Optional[BulkAnalysisRequest] = None, date:
     # Start bulk analysis in background thread
     def run_bulk_parallel():
         global bulk_analysis_state
+        started_at = datetime.now().isoformat()
         bulk_analysis_state = {
+            "task_id": task_id,
             "status": "running",
             "total": len(symbols_to_analyze),
             "total_all": len(SP500_TOP_50_SYMBOLS),
-            "skipped": skipped_count,
+            "skipped": 0,
             "completed": 0,
             "failed": 0,
             "current_symbols": [],
-            "started_at": datetime.now().isoformat(),
+            "started_at": started_at,
             "completed_at": None,
             "results": {},
             "parallel_workers": parallel_workers,
             "cancelled": False
         }
+
+        db.update_analysis_task_status(
+            task_id,
+            status="running",
+            started_at=started_at,
+            total=len(symbols_to_analyze),
+            completed=0,
+            failed=0,
+            skipped=0,
+        )
 
         with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
             future_to_symbol = {
@@ -761,6 +996,14 @@ async def run_bulk_analysis(request: Optional[BulkAnalysisRequest] = None, date:
                     else:
                         bulk_analysis_state["failed"] += 1
 
+                    db.update_analysis_task_status(
+                        task_id,
+                        status="running" if not bulk_analysis_state.get("cancelled") else "cancelled",
+                        completed=bulk_analysis_state["completed"],
+                        failed=bulk_analysis_state["failed"],
+                        skipped=bulk_analysis_state["skipped"],
+                    )
+
                     remaining = [s for s in symbols_to_analyze
                                 if s not in bulk_analysis_state["results"]]
                     bulk_analysis_state["current_symbols"] = remaining[:parallel_workers]
@@ -768,20 +1011,37 @@ async def run_bulk_analysis(request: Optional[BulkAnalysisRequest] = None, date:
                 except Exception as e:
                     bulk_analysis_state["results"][symbol] = f"error: {str(e)}"
                     bulk_analysis_state["failed"] += 1
+                    db.update_analysis_task_status(
+                        task_id,
+                        status="running" if not bulk_analysis_state.get("cancelled") else "cancelled",
+                        completed=bulk_analysis_state["completed"],
+                        failed=bulk_analysis_state["failed"],
+                        skipped=bulk_analysis_state["skipped"],
+                    )
 
-        bulk_analysis_state["status"] = "completed"
+        final_status = "cancelled" if bulk_analysis_state.get("cancelled") else "completed"
+        completed_at = datetime.now().isoformat()
+        bulk_analysis_state["status"] = final_status
         bulk_analysis_state["current_symbols"] = []
-        bulk_analysis_state["completed_at"] = datetime.now().isoformat()
+        bulk_analysis_state["completed_at"] = completed_at
+        db.update_analysis_task_status(
+            task_id,
+            status=final_status,
+            completed=bulk_analysis_state["completed"],
+            failed=bulk_analysis_state["failed"],
+            skipped=bulk_analysis_state["skipped"],
+            completed_at=completed_at,
+        )
 
     thread = threading.Thread(target=run_bulk_parallel)
     thread.start()
 
-    skipped_msg = f", {skipped_count} already done" if skipped_count > 0 else ""
     return {
-        "message": f"Bulk analysis started for {len(symbols_to_analyze)} stocks ({parallel_workers} parallel workers{skipped_msg})",
+        "message": f"Bulk analysis started for {len(symbols_to_analyze)} stocks ({parallel_workers} parallel workers)",
+        "task_id": task_id,
         "date": date,
         "total_stocks": len(symbols_to_analyze),
-        "skipped": skipped_count,
+        "skipped": 0,
         "parallel_workers": parallel_workers,
         "status": "started"
     }
@@ -825,8 +1085,20 @@ async def cancel_bulk_analysis():
     bulk_analysis_state["status"] = "cancelled"
     bulk_analysis_state["completed_at"] = datetime.now().isoformat()
 
+    task_id = bulk_analysis_state.get("task_id")
+    if task_id:
+        db.update_analysis_task_status(
+            task_id,
+            status="cancelled",
+            completed=bulk_analysis_state.get("completed", 0),
+            failed=bulk_analysis_state.get("failed", 0),
+            skipped=bulk_analysis_state.get("skipped", 0),
+            completed_at=bulk_analysis_state["completed_at"],
+        )
+
     return {
         "message": "Bulk analysis cancellation requested",
+        "task_id": task_id,
         "completed": bulk_analysis_state.get("completed", 0),
         "total": bulk_analysis_state.get("total", 0),
         "status": "cancelled"
@@ -878,16 +1150,147 @@ async def run_analysis(symbol: str, background_tasks: BackgroundTasks, request: 
             "max_debate_rounds": request.max_debate_rounds
         }
 
+    task_id = db.create_analysis_task(
+        task_type="single",
+        analysis_date=date,
+        request_symbol=symbol,
+        config_json=analysis_config,
+        status="pending",
+        total=1,
+        completed=0,
+        failed=0,
+        skipped=0,
+    )
+
+    print(
+        f"[TaskLifecycle] created single task | task_id={task_id} symbol={symbol} date={date} status=pending",
+        flush=True,
+    )
+
+    # Mark as initializing before worker thread starts so polling is observable
+    queued_at = datetime.now().isoformat()
+    running_analyses[symbol] = {
+        "task_id": task_id,
+        "date": date,
+        "status": "initializing",
+        "started_at": queued_at,
+        "progress": "Task queued. Waiting for worker thread...",
+        "cancelled": False,
+    }
+    task_to_symbol[task_id] = symbol
+    db.update_analysis_task_status(
+        task_id,
+        status="initializing",
+        started_at=queued_at,
+        total=1,
+        completed=0,
+        failed=0,
+        skipped=0,
+    )
+
     # Start analysis in background thread
-    thread = threading.Thread(target=run_analysis_task, args=(symbol, date, analysis_config))
+    thread = threading.Thread(
+        target=run_analysis_task,
+        args=(task_id, symbol, date, analysis_config),
+        daemon=True,
+        name=f"analysis-{symbol}-{task_id[:8]}",
+    )
     thread.start()
+
+    print(
+        f"[TaskLifecycle] started analysis thread | task_id={task_id} symbol={symbol} thread={thread.name} alive={thread.is_alive()}",
+        flush=True,
+    )
 
     return {
         "message": f"Analysis started for {symbol}",
+        "task_id": task_id,
         "symbol": symbol,
         "date": date,
         "status": "started"
     }
+
+
+STEP_NAMES = {
+    "market_analyst": "Market Analysis",
+    "social_media_analyst": "Social Media Analysis",
+    "news_analyst": "News Analysis",
+    "fundamentals_analyst": "Fundamental Analysis",
+    "bull_researcher": "Bull Research",
+    "bear_researcher": "Bear Research",
+    "research_manager": "Research Manager",
+    "trader": "Trader Decision",
+    "aggressive_analyst": "Aggressive Analysis",
+    "conservative_analyst": "Conservative Analysis",
+    "neutral_analyst": "Neutral Analysis",
+    "risk_manager": "Risk Manager",
+}
+
+STEP_ORDER = list(STEP_NAMES.keys())
+
+
+def _attach_live_progress(result: dict) -> dict:
+    """Attach live pipeline step progress to a task/symbol status payload."""
+    if result.get("status") not in ("running", "initializing"):
+        return result
+
+    symbol = result.get("symbol")
+
+    # Preferred source: step_timer with per-step statuses/durations
+    try:
+        from tradingagents.log_utils import step_timer
+
+        steps = step_timer.get_steps()
+        if steps:
+            completed = [k for k, v in steps.items() if v.get("status") == "completed"]
+            running = [k for k, v in steps.items() if v.get("status") == "running"]
+
+            if running:
+                current_step = STEP_NAMES.get(running[0], running[0])
+                result["progress"] = f"Step {len(completed)+1}/{len(STEP_ORDER)}: {current_step}..."
+            elif completed:
+                last_step = STEP_NAMES.get(completed[-1], completed[-1])
+                result["progress"] = f"Step {len(completed)}/{len(STEP_ORDER)}: {last_step} done"
+
+            result["steps_completed"] = len(completed)
+            result["steps_running"] = [STEP_NAMES.get(s, s) for s in running]
+            result["steps_total"] = len(STEP_ORDER)
+            result["pipeline_steps"] = {
+                step_id: {
+                    "status": entry.get("status"),
+                    "duration_ms": entry.get("duration_ms"),
+                }
+                for step_id, entry in steps.items()
+            }
+            return result
+    except Exception:
+        pass
+
+    # Fallback source: per-symbol coarse progress tracker
+    if symbol:
+        try:
+            from tradingagents.log_utils import symbol_progress
+
+            sp = symbol_progress.get(symbol)
+            done = int(sp.get("done", 0))
+            current = sp.get("current")
+
+            pipeline_steps = {name: {"status": "pending"} for name in STEP_ORDER}
+            if current in pipeline_steps:
+                pipeline_steps[current]["status"] = "running"
+
+            result["steps_completed"] = done
+            result["steps_running"] = [STEP_NAMES.get(current, current)] if current else []
+            result["steps_total"] = len(STEP_ORDER)
+            result["pipeline_steps"] = pipeline_steps
+            if current:
+                result["progress"] = f"Step {min(done + 1, len(STEP_ORDER))}/{len(STEP_ORDER)}: {STEP_NAMES.get(current, current)}..."
+            else:
+                result["progress"] = result.get("progress") or "Initializing analysis pipeline..."
+        except Exception:
+            pass
+
+    return result
 
 
 @app.get("/analyze/{symbol}/status")
@@ -907,51 +1310,28 @@ async def get_analysis_status(symbol: str):
         **running_analyses[symbol]
     }
 
-    # Include live pipeline step progress from step_timer when analysis is running
-    if running_analyses[symbol].get("status") == "running":
-        try:
-            from tradingagents.log_utils import step_timer
+    result = _attach_live_progress(result)
+    return result
 
-            steps = step_timer.get_steps()
-            if steps:
-                # Build a live progress summary
-                STEP_NAMES = {
-                    "market_analyst": "Market Analysis",
-                    "social_media_analyst": "Social Media Analysis",
-                    "news_analyst": "News Analysis",
-                    "fundamentals_analyst": "Fundamental Analysis",
-                    "bull_researcher": "Bull Research",
-                    "bear_researcher": "Bear Research",
-                    "research_manager": "Research Manager",
-                    "trader": "Trader Decision",
-                    "aggressive_analyst": "Aggressive Analysis",
-                    "conservative_analyst": "Conservative Analysis",
-                    "neutral_analyst": "Neutral Analysis",
-                    "risk_manager": "Risk Manager",
-                }
 
-                completed = [k for k, v in steps.items() if v.get("status") == "completed"]
-                running = [k for k, v in steps.items() if v.get("status") == "running"]
-                total = 12
+@app.get("/analyze/task/{task_id}/status")
+async def get_analysis_status_by_task(task_id: str):
+    """Get status for a specific analysis task_id."""
+    result = _get_status_by_task_id(task_id)
+    if not result:
+        print(f"[TaskStatus] task not found | task_id={task_id}", flush=True)
+        return {
+            "task_id": task_id,
+            "status": "not_found",
+            "message": "No analysis task found"
+        }
 
-                # Build progress message from live step data
-                if running:
-                    current_step = STEP_NAMES.get(running[0], running[0])
-                    result["progress"] = f"Step {len(completed)+1}/{total}: {current_step}..."
-                elif completed:
-                    last_step = STEP_NAMES.get(completed[-1], completed[-1])
-                    result["progress"] = f"Step {len(completed)}/{total}: {last_step} done"
+    result = _attach_live_progress(result)
 
-                result["steps_completed"] = len(completed)
-                result["steps_running"] = [STEP_NAMES.get(s, s) for s in running]
-                result["steps_total"] = total
-                result["pipeline_steps"] = {
-                    k: {"status": v.get("status"), "duration_ms": v.get("duration_ms")}
-                    for k, v in steps.items()
-                }
-        except Exception:
-            pass  # Don't fail status endpoint if step_timer unavailable
-
+    print(
+        f"[TaskStatus] polled | task_id={task_id} symbol={result.get('symbol')} status={result.get('status')} progress={result.get('progress')} steps={result.get('steps_completed', 0)}/{result.get('steps_total', 0)} running={result.get('steps_running', [])}",
+        flush=True,
+    )
     return result
 
 
@@ -973,10 +1353,21 @@ async def cancel_analysis(symbol: str):
     running_analyses[symbol]["progress"] = "Cancellation requested..."
     running_analyses[symbol]["completed_at"] = datetime.now().isoformat()
 
+    task_id = running_analyses[symbol].get("task_id")
+    if task_id:
+        db.update_analysis_task_status(
+            task_id,
+            status="cancelled",
+            completed=0,
+            failed=1,
+            completed_at=running_analyses[symbol]["completed_at"],
+        )
+
     add_log("info", "system", f"🛑 Cancellation requested for {symbol}")
 
     return {
         "message": f"Cancellation requested for {symbol}",
+        "task_id": task_id,
         "symbol": symbol,
         "status": "cancelled"
     }
@@ -1057,20 +1448,23 @@ async def get_accuracy_metrics():
 
 
 @app.get("/backtest/{date}/detailed")
-async def get_detailed_backtest(date: str):
+async def get_detailed_backtest(date: str, task_id: Optional[str] = None):
     """Get enriched backtest data with live prices, formulas, agent reports, and debate summaries."""
     import yfinance as yf
 
-    rec = db.get_recommendation_by_date(date)
+    rec = db.get_recommendation_by_date(date=date, task_id=task_id)
     if not rec or 'analysis' not in rec:
-        return {"date": date, "total_stocks": 0, "stocks": []}
+        return {"date": date, "task_id": task_id, "total_stocks": 0, "stocks": []}
 
     analysis = rec['analysis']
-    backtest_results = db.get_backtest_results_by_date(date)
+    effective_date = rec.get('date') or date
+    effective_task_id = task_id or rec.get('task_id')
+    backtest_results = db.get_backtest_results_by_date(date=effective_date, task_id=effective_task_id)
     bt_by_symbol = {r['symbol']: r for r in backtest_results}
 
-    pred_date = datetime.strptime(date, '%Y-%m-%d')
+    pred_date = datetime.strptime(effective_date, '%Y-%m-%d')
     today = datetime.now()
+
 
     # Collect symbols that need live prices (active hold periods)
     symbols_needing_live = []
@@ -1152,7 +1546,7 @@ async def get_detailed_backtest(date: str):
         # Agent reports (condensed)
         agent_summary = {}
         try:
-            reports = db.get_agent_reports(date, symbol)
+            reports = db.get_agent_reports(date=effective_date, symbol=symbol, task_id=effective_task_id)
             for agent_type, report_data in reports.items():
                 content = report_data.get('report_content', '')
                 # Take first 300 chars as summary
@@ -1163,7 +1557,7 @@ async def get_detailed_backtest(date: str):
         # Debate summary
         debate_summary = {}
         try:
-            debates = db.get_debate_history(date, symbol)
+            debates = db.get_debate_history(date=effective_date, symbol=symbol, task_id=effective_task_id)
             for debate_type, debate_data in debates.items():
                 judge = debate_data.get('judge_decision', '')
                 judge_short = judge[:200] + ('...' if len(judge) > 200 else '') if judge else ''
@@ -1196,22 +1590,28 @@ async def get_detailed_backtest(date: str):
     # Sort by rank
     stocks.sort(key=lambda s: s.get('rank') or 999)
 
-    return {"date": date, "total_stocks": len(stocks), "stocks": stocks}
+    return {
+        "date": effective_date,
+        "task_id": effective_task_id,
+        "total_stocks": len(stocks),
+        "stocks": stocks,
+    }
 
 
 @app.get("/backtest/{date}/{symbol}")
-async def get_backtest_result(date: str, symbol: str):
-    """Get backtest result for a specific stock and date.
+async def get_backtest_result(date: str, symbol: str, task_id: Optional[str] = None):
+    """Get backtest result for a specific stock and date/task.
 
     Returns pre-calculated results only (no on-demand yfinance fetching)
     to avoid blocking the event loop.
     """
-    result = db.get_backtest_result(date, symbol.upper())
+    result = db.get_backtest_result(date=date, symbol=symbol.upper(), task_id=task_id)
     if not result:
         return {'available': False, 'reason': 'Backtest not yet calculated'}
 
     return {
         'available': True,
+        'task_id': result.get('task_id') or task_id,
         'prediction_correct': result['prediction_correct'],
         'actual_return_1d': result['return_1d'],
         'actual_return_1w': result['return_1w'],
@@ -1224,27 +1624,32 @@ async def get_backtest_result(date: str, symbol: str):
 
 
 @app.get("/backtest/{date}")
-async def get_backtest_results_for_date(date: str):
-    """Get all backtest results for a specific date."""
-    results = db.get_backtest_results_by_date(date)
-    return {"date": date, "results": results}
+async def get_backtest_results_for_date(date: str, task_id: Optional[str] = None):
+    """Get all backtest results for a specific date/task."""
+    results = db.get_backtest_results_by_date(date=date, task_id=task_id)
+    return {"date": date, "task_id": task_id, "results": results}
 
 
 @app.post("/backtest/{date}/calculate")
-async def calculate_backtest_for_date(date: str):
-    """Calculate backtest for all recommendations on a date (runs in background thread)."""
+async def calculate_backtest_for_date(date: str, task_id: Optional[str] = None):
+    """Calculate backtest for all recommendations on a date/task (runs in background thread)."""
     import backtest_service as bt
 
     # Run calculation in a separate thread to avoid blocking the event loop
     def run_backtest():
         try:
-            bt.backtest_all_recommendations_for_date(date)
+            bt.backtest_all_recommendations_for_date(date=date, task_id=task_id)
         except Exception as e:
-            print(f"Backtest calculation error for {date}: {e}")
+            print(f"Backtest calculation error for {date} (task={task_id}): {e}")
 
     thread = threading.Thread(target=run_backtest)
     thread.start()
-    return {"status": "started", "date": date, "message": "Backtest calculation started in background"}
+    return {
+        "status": "started",
+        "date": date,
+        "task_id": task_id,
+        "message": "Backtest calculation started in background"
+    }
 
 
 # ============== Stock Price History Endpoint ==============
@@ -1411,44 +1816,79 @@ def _auto_analyze_scheduler():
 
             # Same logic as POST /analyze/all
             analysis_date = today_str
-            already_analyzed = set(db.get_analyzed_symbols_for_date(analysis_date))
-            symbols_to_analyze = [s for s in SP500_TOP_50_SYMBOLS if s not in already_analyzed]
+            symbols_to_analyze = list(SP500_TOP_50_SYMBOLS)
+            bulk_task_id = db.create_analysis_task(
+                task_type="bulk",
+                analysis_date=analysis_date,
+                config_json={**analysis_config, "parallel_workers": parallel_workers, "source": "scheduler"},
+                status="pending",
+                total=len(symbols_to_analyze),
+                completed=0,
+                failed=0,
+                skipped=0,
+            )
 
             if not symbols_to_analyze:
-                print(f"[AutoSchedule] All stocks already analyzed for {analysis_date}")
+                print(f"[AutoSchedule] No symbols configured for {analysis_date}")
                 continue
 
             def run_auto_bulk():
                 global bulk_analysis_state
+                started_at = datetime.now().isoformat()
                 bulk_analysis_state = {
+                    "task_id": bulk_task_id,
                     "status": "running",
                     "total": len(symbols_to_analyze),
                     "total_all": len(SP500_TOP_50_SYMBOLS),
-                    "skipped": len(already_analyzed),
+                    "skipped": 0,
                     "completed": 0,
                     "failed": 0,
                     "current_symbols": [],
-                    "started_at": datetime.now().isoformat(),
+                    "started_at": started_at,
                     "completed_at": None,
                     "results": {},
                     "parallel_workers": parallel_workers,
                     "cancelled": False,
                 }
 
+                db.update_analysis_task_status(
+                    bulk_task_id,
+                    status="running",
+                    started_at=started_at,
+                    total=len(symbols_to_analyze),
+                    completed=0,
+                    failed=0,
+                    skipped=0,
+                )
+
                 with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
                     def analyze_one(symbol):
                         try:
                             if bulk_analysis_state.get("cancelled"):
                                 return (symbol, "cancelled", None)
-                            run_analysis_task(symbol, analysis_date, analysis_config)
+
+                            stock_task_id = db.create_analysis_task(
+                                task_type="single",
+                                analysis_date=analysis_date,
+                                request_symbol=symbol,
+                                config_json=analysis_config,
+                                status="pending",
+                                total=1,
+                                completed=0,
+                                failed=0,
+                                skipped=0,
+                            )
+
+                            run_analysis_task(stock_task_id, symbol, analysis_date, analysis_config)
                             max_wait = 600
                             waited = 0
                             while waited < max_wait:
                                 if bulk_analysis_state.get("cancelled"):
                                     return (symbol, "cancelled", None)
-                                if symbol not in running_analyses:
+                                status_data = _get_status_by_task_id(stock_task_id)
+                                if not status_data:
                                     return (symbol, "unknown", None)
-                                status = running_analyses[symbol].get("status")
+                                status = status_data.get("status")
                                 if status not in ("running", "initializing"):
                                     return (symbol, status, None)
                                 time.sleep(2)
@@ -1472,16 +1912,45 @@ def _auto_analyze_scheduler():
                                 bulk_analysis_state["completed"] += 1
                             else:
                                 bulk_analysis_state["failed"] += 1
+
+                            db.update_analysis_task_status(
+                                bulk_task_id,
+                                status="running" if not bulk_analysis_state.get("cancelled") else "cancelled",
+                                completed=bulk_analysis_state["completed"],
+                                failed=bulk_analysis_state["failed"],
+                                skipped=bulk_analysis_state["skipped"],
+                            )
+
                             remaining = [s for s in symbols_to_analyze if s not in bulk_analysis_state["results"]]
                             bulk_analysis_state["current_symbols"] = remaining[:parallel_workers]
                         except Exception as e:
                             bulk_analysis_state["results"][sym] = f"error: {str(e)}"
                             bulk_analysis_state["failed"] += 1
+                            db.update_analysis_task_status(
+                                bulk_task_id,
+                                status="running" if not bulk_analysis_state.get("cancelled") else "cancelled",
+                                completed=bulk_analysis_state["completed"],
+                                failed=bulk_analysis_state["failed"],
+                                skipped=bulk_analysis_state["skipped"],
+                            )
 
-                bulk_analysis_state["status"] = "completed"
+                final_status = "cancelled" if bulk_analysis_state.get("cancelled") else "completed"
+                completed_at = datetime.now().isoformat()
+                bulk_analysis_state["status"] = final_status
                 bulk_analysis_state["current_symbols"] = []
-                bulk_analysis_state["completed_at"] = datetime.now().isoformat()
+                bulk_analysis_state["completed_at"] = completed_at
+
+                db.update_analysis_task_status(
+                    bulk_task_id,
+                    status=final_status,
+                    completed=bulk_analysis_state["completed"],
+                    failed=bulk_analysis_state["failed"],
+                    skipped=bulk_analysis_state["skipped"],
+                    completed_at=completed_at,
+                )
+
                 print(f"[AutoSchedule] Daily analysis completed: {bulk_analysis_state['completed']} succeeded, {bulk_analysis_state['failed']} failed")
+
 
             threading.Thread(target=run_auto_bulk, daemon=True).start()
 
@@ -1493,6 +1962,7 @@ def _auto_analyze_scheduler():
 @app.on_event("startup")
 async def startup_event():
     """Rebuild daily_recommendations and trigger backtest calculations at startup."""
+    db.init_db()
     db.rebuild_all_daily_recommendations()
 
     # Start auto-analyze scheduler
@@ -1511,13 +1981,13 @@ async def startup_event():
         import backtest_service as bt
         dates = db.get_all_dates()
         for date in dates:
-            existing = db.get_backtest_results_by_date(date)
-            rec = db.get_recommendation_by_date(date)
+            existing = db.get_backtest_results_by_date(date=date)
+            rec = db.get_recommendation_by_date(date=date)
             expected_count = len(rec.get('analysis', {})) if rec else 0
             if len(existing) < expected_count:
                 print(f"[Backtest] Calculating for {date} ({len(existing)}/{expected_count} done)...")
                 try:
-                    bt.backtest_all_recommendations_for_date(date)
+                    bt.backtest_all_recommendations_for_date(date=date)
                 except Exception as e:
                     print(f"[Backtest] Error for {date}: {e}")
 
