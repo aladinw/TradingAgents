@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Calendar, RefreshCw, Filter, ChevronRight, TrendingUp, TrendingDown, Minus, History, Search, X, Play, Loader2, Square, AlertCircle, Terminal } from 'lucide-react';
 import TopPicks, { StocksToAvoid } from '../components/TopPicks';
 import { DecisionBadge, HoldDaysBadge, RankBadge } from '../components/StockCard';
@@ -14,26 +14,54 @@ import type { Decision, StockAnalysis, DailyRecommendation, SP500Stock } from '.
 type FilterType = 'ALL' | Decision;
 
 export default function Dashboard() {
+  const [searchParams] = useSearchParams();
+  const initialTaskId = searchParams.get('task_id');
+
   // State for real API data
   const [recommendation, setRecommendation] = useState<DailyRecommendation | null>(null);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(initialTaskId);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
   // Fetch recommendation from API
   const fetchRecommendation = useCallback(async () => {
     setIsLoadingData(true);
     try {
+      if (activeTaskId) {
+        try {
+          const taskData = await api.getTaskRecommendation(activeTaskId);
+          if (taskData && taskData.analysis && Object.keys(taskData.analysis).length > 0) {
+            setRecommendation(taskData);
+            if (taskData.task_id && taskData.task_id !== activeTaskId) {
+              setActiveTaskId(taskData.task_id);
+            }
+            return;
+          }
+        } catch (taskError) {
+          console.warn(`Failed to fetch task recommendation for ${activeTaskId}, falling back to latest:`, taskError);
+        }
+      }
+
       const data = await api.getLatestRecommendation();
       if (data && data.analysis && Object.keys(data.analysis).length > 0) {
         setRecommendation(data);
+        if (data.task_id) {
+          setActiveTaskId(data.task_id);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch recommendation from API:', error);
     } finally {
       setIsLoadingData(false);
     }
-  }, []);
+  }, [activeTaskId]);
 
-  // Fetch on mount
+  // Keep task context in sync with URL query
+  useEffect(() => {
+    if (initialTaskId && initialTaskId !== activeTaskId) {
+      setActiveTaskId(initialTaskId);
+    }
+  }, [initialTaskId, activeTaskId]);
+
   useEffect(() => {
     fetchRecommendation();
   }, [fetchRecommendation]);
@@ -57,6 +85,7 @@ export default function Dashboard() {
   });
   const [isCancelling, setIsCancelling] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<{
+    task_id?: string;
     status: string;
     total: number;
     completed: number;
@@ -96,6 +125,9 @@ export default function Dashboard() {
         const status = await api.getBulkAnalysisStatus();
         if (status.status === 'running') {
           updateAnalysisState(true, status);
+          if (status.task_id) {
+            setActiveTaskId(status.task_id);
+          }
         } else if (isAnalyzing) {
           // localStorage said running but backend says otherwise (server restarted)
           updateAnalysisState(false, null);
@@ -117,16 +149,31 @@ export default function Dashboard() {
         const status = await api.getBulkAnalysisStatus();
         // Persist progress to localStorage on every poll
         updateAnalysisState(true, status);
+        if (status.task_id) {
+          setActiveTaskId(status.task_id);
+        }
 
         // Incremental re-fetch: when completed count increases, refresh recommendation data
         const newCompleted = status.completed + (status.skipped || 0);
         if (newCompleted > prevCompletedRef.current) {
           prevCompletedRef.current = newCompleted;
           try {
-            const data = await api.getLatestRecommendation();
-            if (data && data.analysis && Object.keys(data.analysis).length > 0) {
-              setRecommendation(data);
-              setIsUsingMockData(false);
+            if (status.task_id) {
+              const taskData = await api.getTaskRecommendation(status.task_id);
+              if (taskData && taskData.analysis && Object.keys(taskData.analysis).length > 0) {
+                setRecommendation(taskData);
+                if (taskData.task_id) {
+                  setActiveTaskId(taskData.task_id);
+                }
+              }
+            } else {
+              const data = await api.getLatestRecommendation();
+              if (data && data.analysis && Object.keys(data.analysis).length > 0) {
+                setRecommendation(data);
+                if (data.task_id) {
+                  setActiveTaskId(data.task_id);
+                }
+              }
             }
           } catch (e) {
             console.warn('Re-fetch during analysis failed:', e);
@@ -174,11 +221,17 @@ export default function Dashboard() {
     if (isAnalyzing) return;
 
     const initialProgress = {
+      task_id: undefined as string | undefined,
       status: 'starting',
       total: 50,
       completed: 0,
       failed: 0,
-      current_symbol: null as string | null
+      skipped: 0,
+      current_symbol: null as string | null,
+      current_symbols: [] as string[],
+      results: {} as Record<string, string>,
+      parallel_workers: settings.parallelWorkers,
+      stock_progress: {} as Record<string, { done: number; total: number; current: string | null }>,
     };
     updateAnalysisState(true, initialProgress);
 
@@ -192,6 +245,10 @@ export default function Dashboard() {
         max_debate_rounds: settings.maxDebateRounds,
         parallel_workers: settings.parallelWorkers
       });
+
+      if (result.task_id) {
+        setActiveTaskId(result.task_id);
+      }
 
       // If all stocks already analyzed, exit analyzing mode
       if (result.status === 'completed' || result.total_stocks === 0) {
@@ -295,7 +352,7 @@ export default function Dashboard() {
 
       return {
         symbol,
-        company_name: niftyStock.company_name,
+        company_name: stock.company_name,
         liveState,
         analysis: existingAnalysis,
       };
@@ -644,7 +701,7 @@ export default function Dashboard() {
               return (
                 <Link
                   key={item.symbol}
-                  to={`/stock/${item.symbol}`}
+                  to={`/stock/${item.symbol}${activeTaskId ? `?task_id=${encodeURIComponent(activeTaskId)}` : ''}`}
                   className="card-hover p-2 group relative overflow-hidden"
                   role="listitem"
                 >
@@ -754,7 +811,7 @@ export default function Dashboard() {
 
       {/* Compact CTA */}
       <Link
-        to="/history"
+        to={`/history${activeTaskId ? `?task_id=${encodeURIComponent(activeTaskId)}` : ''}`}
         className="flex items-center justify-between p-4 rounded-xl text-white group focus:outline-none focus:ring-2 focus:ring-nifty-500 focus:ring-offset-2 transition-all hover:shadow-lg"
         style={{
           background: 'linear-gradient(135deg, #0284c7, #0369a1)',

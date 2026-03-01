@@ -103,6 +103,7 @@ export interface StockToAvoid {
 
 export interface DailyRecommendation {
   date: string;
+  task_id?: string;
   analysis: Record<string, StockAnalysis>;
   ranking?: RankingResult;  // Optional since API may not return it
   summary: {

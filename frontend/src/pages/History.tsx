@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { Calendar, TrendingUp, TrendingDown, Minus, ChevronRight, ChevronDown, BarChart3, Target, HelpCircle, Activity, Calculator, LineChart, PieChart, Shield, Filter, Clock, Zap, Award, ArrowUpRight, ArrowDownRight, Play, Loader2, FileText, MessageSquare, Search, XCircle, AlertTriangle } from 'lucide-react';
 import type { ReturnBreakdown } from '../types';
 import { DecisionBadge, HoldDaysBadge, RankBadge } from '../components/StockCard';
-import Sparkline from '../components/Sparkline';
 import AccuracyExplainModal from '../components/AccuracyExplainModal';
 import ReturnExplainModal from '../components/ReturnExplainModal';
 import OverallReturnModal, { type OverallReturnBreakdown } from '../components/OverallReturnModal';
@@ -15,7 +14,7 @@ import IndexComparisonChart from '../components/IndexComparisonChart';
 import InfoModal from '../components/InfoModal';
 import { api } from '../services/api';
 import { useSettings } from '../contexts/SettingsContext';
-import type { StockAnalysis, DailyRecommendation, RiskMetrics, ReturnBucket, CumulativeReturnPoint } from '../types';
+import type { StockAnalysis, DailyRecommendation, RiskMetrics, ReturnBucket, CumulativeReturnPoint, Decision } from '../types';
 
 // Type for batch backtest data (per date, per symbol)
 type BacktestByDate = Record<string, Record<string, {
@@ -82,11 +81,6 @@ function InvestmentModeToggle({
   );
 }
 
-// Pulsing skeleton bar for loading states
-function SkeletonBar({ className = '' }: { className?: string }) {
-  return <div className={`animate-pulse bg-gray-200 dark:bg-slate-700 rounded ${className}`} />;
-}
-
 // Section header with icon and optional right content
 function SectionHeader({ icon, title, right, subtitle }: { icon: React.ReactNode; title: string; right?: React.ReactNode; subtitle?: string }) {
   return (
@@ -125,8 +119,10 @@ export default function History() {
   // Backtest feature state
   const [backtestDateInput, setBacktestDateInput] = useState('');
   const [isRunningBacktest, setIsRunningBacktest] = useState(false);
+  const [currentBacktestTaskId, setCurrentBacktestTaskId] = useState<string | null>(null);
   const [detailedBacktest, setDetailedBacktest] = useState<{
     date: string;
+    task_id?: string;
     total_stocks: number;
     stocks: Array<{
       symbol: string; company_name: string; rank?: number;
@@ -623,6 +619,16 @@ export default function History() {
 
   const getRecommendation = (date: string) => recommendations.find(r => r.date === date);
 
+  const getTaskIdForDate = useCallback((date: string): string | null => {
+    if (detailedBacktest?.date === date && detailedBacktest.task_id) {
+      return detailedBacktest.task_id;
+    }
+    if (currentBacktestTaskId) {
+      return currentBacktestTaskId;
+    }
+    return recommendations.find(r => r.date === date)?.task_id ?? null;
+  }, [detailedBacktest, currentBacktestTaskId, recommendations]);
+
   const getFilteredStocks = (date: string) => {
     const rec = getRecommendation(date);
     if (!rec) return [];
@@ -679,12 +685,15 @@ export default function History() {
   }, [recommendations, batchBacktestByDate]);
 
   // Load detailed backtest data for a specific date
-  const loadDetailedBacktest = useCallback(async (date: string) => {
+  const loadDetailedBacktest = useCallback(async (date: string, taskId?: string) => {
     setIsLoadingDetailed(true);
     setDetailedBacktest(null);
     setExpandedStock(null);
     try {
-      const data = await api.getDetailedBacktest(date);
+      const data = await api.getDetailedBacktest(date, taskId);
+      if (data?.task_id) {
+        setCurrentBacktestTaskId(data.task_id);
+      }
       setDetailedBacktest(data);
     } catch (error) {
       console.error('Failed to load detailed backtest:', error);
@@ -703,12 +712,15 @@ export default function History() {
   const handleRunBacktest = useCallback(async () => {
     if (!backtestDateInput) return;
     setBacktestMessage(null);
+    setCurrentBacktestTaskId(null);
     if (backtestPollRef.current) { clearInterval(backtestPollRef.current); backtestPollRef.current = null; }
+
+    const existingTaskId = getTaskIdForDate(backtestDateInput);
 
     // If date already has data in the loaded bundle, select it and load detailed view
     if (dates.includes(backtestDateInput)) {
       setSelectedDate(backtestDateInput);
-      loadDetailedBacktest(backtestDateInput);
+      loadDetailedBacktest(backtestDateInput, existingTaskId || undefined);
       return;
     }
 
@@ -716,7 +728,10 @@ export default function History() {
     setIsRunningBacktest(true);
     setBacktestMessage({ type: 'progress', text: 'Checking for existing data...' });
     try {
-      const data = await api.getDetailedBacktest(backtestDateInput);
+      const data = await api.getDetailedBacktest(backtestDateInput, existingTaskId || undefined);
+      if (data?.task_id) {
+        setCurrentBacktestTaskId(data.task_id);
+      }
       if (data && data.stocks && data.stocks.length > 0) {
         setSelectedDate(backtestDateInput);
         setDetailedBacktest(data);
@@ -731,7 +746,7 @@ export default function History() {
     // No data — auto-trigger bulk analysis for this date
     setBacktestMessage({ type: 'progress', text: `Starting analysis for ${backtestDateInput}... This runs all 50 stocks through the AI pipeline.` });
     try {
-      await api.runBulkAnalysis(backtestDateInput, {
+      const runResp = await api.runBulkAnalysis(backtestDateInput, {
         deep_think_model: settings.deepThinkModel,
         quick_think_model: settings.quickThinkModel,
         provider: settings.provider,
@@ -740,19 +755,37 @@ export default function History() {
         parallel_workers: settings.parallelWorkers,
       });
 
+      const taskId = runResp.task_id || null;
+      if (taskId) {
+        setCurrentBacktestTaskId(taskId);
+      }
+
       // Poll for progress
       backtestPollRef.current = setInterval(async () => {
         try {
-          const status = await api.getBulkAnalysisStatus();
-          const pct = status.total > 0 ? Math.round((status.completed / status.total) * 100) : 0;
-          const currentStocks = status.current_symbols?.join(', ') || status.current_symbol || '';
+          const status = taskId
+            ? await api.getAnalysisStatusByTask(taskId)
+            : await api.getBulkAnalysisStatus();
+
+          const statusTotal = 'total' in status && typeof status.total === 'number' ? status.total : 0;
+          const statusCompleted = 'completed' in status && typeof status.completed === 'number' ? status.completed : 0;
+          const statusFailed = 'failed' in status && typeof status.failed === 'number' ? status.failed : 0;
+          const statusCancelled = 'cancelled' in status && Boolean(status.cancelled);
+          const currentStocks = 'current_symbols' in status && Array.isArray(status.current_symbols)
+            ? status.current_symbols.join(', ')
+            : ('current_symbol' in status ? (status.current_symbol || '') : '');
+
+          const pct = statusTotal > 0 ? Math.round((statusCompleted / statusTotal) * 100) : 0;
 
           if (status.status === 'completed' || status.status === 'idle') {
             if (backtestPollRef.current) { clearInterval(backtestPollRef.current); backtestPollRef.current = null; }
             setBacktestMessage({ type: 'progress', text: 'Analysis complete! Loading detailed backtest...' });
             // Load the results
             try {
-              const data = await api.getDetailedBacktest(backtestDateInput);
+              const data = await api.getDetailedBacktest(backtestDateInput, taskId || undefined);
+              if (data?.task_id) {
+                setCurrentBacktestTaskId(data.task_id);
+              }
               setSelectedDate(backtestDateInput);
               setDetailedBacktest(data);
               setBacktestMessage(null);
@@ -760,15 +793,20 @@ export default function History() {
               setBacktestMessage({ type: 'error', text: 'Analysis completed but failed to load results. Try clicking a date card.' });
             }
             setIsRunningBacktest(false);
-          } else if (status.status === 'failed' || status.cancelled) {
+          } else if (status.status === 'failed' || statusCancelled) {
             if (backtestPollRef.current) { clearInterval(backtestPollRef.current); backtestPollRef.current = null; }
             setIsRunningBacktest(false);
-            setBacktestMessage({ type: 'error', text: `Analysis ${status.cancelled ? 'cancelled' : 'failed'}. ${status.completed}/${status.total} stocks completed.` });
+            setBacktestMessage({ type: 'error', text: `Analysis ${statusCancelled ? 'cancelled' : 'failed'}. ${statusCompleted}/${statusTotal} stocks completed.` });
           } else {
             setBacktestMessage({
               type: 'progress',
-              text: `Analyzing stocks... ${status.completed}/${status.total} done (${pct}%)${currentStocks ? ` — Currently: ${currentStocks}` : ''}`
+              text: `Analyzing stocks... ${statusCompleted}/${statusTotal} done (${pct}%)${currentStocks ? ` — Currently: ${currentStocks}` : ''}`
             });
+          }
+
+          if (statusTotal > 0 && statusCompleted + statusFailed >= statusTotal && status.status !== 'completed') {
+            if (backtestPollRef.current) { clearInterval(backtestPollRef.current); backtestPollRef.current = null; }
+            setIsRunningBacktest(false);
           }
         } catch {
           // Poll error, keep trying
@@ -779,7 +817,7 @@ export default function History() {
       setIsRunningBacktest(false);
       setBacktestMessage({ type: 'error', text: 'Failed to start analysis. Check that the backend is running.' });
     }
-  }, [backtestDateInput, dates, loadDetailedBacktest, settings]);
+  }, [backtestDateInput, dates, getTaskIdForDate, loadDetailedBacktest, settings]);
 
   const handleCancelBacktest = useCallback(async () => {
     try {
@@ -1065,7 +1103,13 @@ export default function History() {
             return (
               <div key={date} className="relative group">
                 <button
-                  onClick={() => setSelectedDate(selectedDate === date ? null : date)}
+                  onClick={() => {
+                    const nextDate = selectedDate === date ? null : date;
+                    setSelectedDate(nextDate);
+                    if (nextDate) {
+                      setCurrentBacktestTaskId(getTaskIdForDate(nextDate));
+                    }
+                  }}
                   className={`px-3 py-2.5 rounded-xl text-xs font-medium transition-all min-w-[90px] border ${
                     selectedDate === date
                       ? 'bg-nifty-600 text-white ring-2 ring-nifty-400/50 border-nifty-500 shadow-lg shadow-nifty-500/20'
@@ -1174,7 +1218,7 @@ export default function History() {
                 if (detailedBacktest?.date === selectedDate) {
                   setDetailedBacktest(null);
                 } else {
-                  loadDetailedBacktest(selectedDate);
+                  loadDetailedBacktest(selectedDate, getTaskIdForDate(selectedDate) || undefined);
                 }
               }}
               disabled={isLoadingDetailed}
@@ -1208,8 +1252,8 @@ export default function History() {
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         <RankBadge rank={stock.rank} size="small" />
                         <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{stock.symbol}</span>
-                        <DecisionBadge decision={stock.decision} size="small" />
-                        <HoldDaysBadge holdDays={stock.hold_days} decision={stock.decision} />
+                        <DecisionBadge decision={stock.decision as Decision} size="small" />
+                        <HoldDaysBadge holdDays={stock.hold_days} decision={stock.decision as Decision} />
                       </div>
                       <div className="flex items-center gap-3">
                         {stock.price_at_prediction !== null && (
@@ -1294,7 +1338,7 @@ export default function History() {
                             <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Decision Reasoning</span>
                           </div>
                           <div className="flex items-center gap-2 mb-2">
-                            <DecisionBadge decision={stock.decision} size="small" />
+                            <DecisionBadge decision={stock.decision as Decision} size="small" />
                             <span className="text-xs text-gray-500 dark:text-gray-400">
                               {stock.confidence} confidence, {stock.risk} risk
                             </span>
@@ -1352,7 +1396,7 @@ export default function History() {
 
                         {/* Link to full stock detail */}
                         <Link
-                          to={`/stock/${stock.symbol}`}
+                          to={`/stock/${stock.symbol}${detailedBacktest?.task_id ? `?task_id=${encodeURIComponent(detailedBacktest.task_id)}` : ''}`}
                           className="flex items-center gap-1.5 text-xs font-medium text-nifty-600 dark:text-nifty-400 hover:underline"
                         >
                           View full stock detail
@@ -1384,7 +1428,7 @@ export default function History() {
                 return (
                   <Link
                     key={stock.symbol}
-                    to={`/stock/${stock.symbol}`}
+                    to={`/stock/${stock.symbol}${getTaskIdForDate(selectedDate) ? `?task_id=${encodeURIComponent(getTaskIdForDate(selectedDate) as string)}` : ''}`}
                     className="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50/80 dark:hover:bg-slate-700/30 transition-colors group"
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">

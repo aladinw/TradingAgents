@@ -324,8 +324,6 @@ function EmptyState({ status }: { status: string }) {
 
 export function NodeDetailDrawer({ node, pipelineData, onClose }: NodeDetailDrawerProps) {
   const details: StepDetails | undefined = node.step_details;
-  const inputSources = STEP_INPUT_SOURCES[node.id] || [];
-  const hasForwardedContext = inputSources.length > 0;
 
   // Step Output: the ACTUAL meaningful output (agent report / debate content first, then raw response)
   // Always strip TOOL_CALL lines from step output since they're noise in the output view

@@ -61,6 +61,43 @@ export interface AnalysisConfig {
   max_debate_rounds?: number;
 }
 
+export interface AnalysisTask {
+  task_id: string;
+  task_type: 'single' | 'bulk' | string;
+  request_symbol?: string | null;
+  analysis_date: string;
+  status: string;
+  total?: number;
+  completed?: number;
+  failed?: number;
+  skipped?: number;
+  created_at?: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface TaskListResponse {
+  tasks: AnalysisTask[];
+  count: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AnalysisStatusResponse {
+  task_id?: string;
+  symbol?: string;
+  status: string;
+  progress?: string;
+  error?: string;
+  decision?: string;
+  started_at?: string;
+  completed_at?: string;
+  steps_completed?: number;
+  steps_total?: number;
+  steps_running?: string[];
+  pipeline_steps?: Record<string, { status: string; duration_ms?: number }>;
+}
+
 class ApiService {
   private baseUrl: string;
 
@@ -102,6 +139,43 @@ class ApiService {
    */
   async getAllRecommendations(): Promise<{ recommendations: DailyRecommendation[]; count: number }> {
     return this.fetch('/recommendations');
+  }
+
+  /**
+   * List analysis tasks
+   */
+  async getTasks(params?: {
+    limit?: number;
+    offset?: number;
+    status?: string;
+    task_type?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<TaskListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit !== undefined) searchParams.set('limit', String(params.limit));
+    if (params?.offset !== undefined) searchParams.set('offset', String(params.offset));
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.task_type) searchParams.set('task_type', params.task_type);
+    if (params?.start_date) searchParams.set('start_date', params.start_date);
+    if (params?.end_date) searchParams.set('end_date', params.end_date);
+
+    const query = searchParams.toString();
+    return this.fetch(`/tasks${query ? `?${query}` : ''}`, { noCache: true });
+  }
+
+  /**
+   * Get one analysis task by ID
+   */
+  async getTask(taskId: string): Promise<AnalysisTask> {
+    return this.fetch(`/tasks/${encodeURIComponent(taskId)}`, { noCache: true });
+  }
+
+  /**
+   * Get recommendation payload for a task
+   */
+  async getTaskRecommendation(taskId: string): Promise<DailyRecommendation> {
+    return this.fetch(`/tasks/${encodeURIComponent(taskId)}/recommendation`, { noCache: true });
   }
 
   /**
@@ -160,43 +234,89 @@ class ApiService {
   /**
    * Get full pipeline data for a stock on a specific date
    */
-  async getPipelineData(date: string, symbol: string, refresh = false): Promise<FullPipelineData> {
-    return this.fetch(`/recommendations/${date}/${symbol}/pipeline`, { noCache: refresh });
+  async getPipelineData(date: string, symbol: string, refresh = false, taskId?: string): Promise<FullPipelineData> {
+    const taskQuery = taskId ? `?task_id=${encodeURIComponent(taskId)}` : '';
+    return this.fetch(`/recommendations/${date}/${symbol}/pipeline${taskQuery}`, { noCache: refresh });
+  }
+
+  /**
+   * Get full pipeline data for a stock in a specific task
+   */
+  async getTaskPipelineData(taskId: string, symbol: string, refresh = false): Promise<FullPipelineData> {
+    return this.fetch(`/tasks/${encodeURIComponent(taskId)}/${encodeURIComponent(symbol)}/pipeline`, { noCache: refresh });
   }
 
   /**
    * Get agent reports for a stock on a specific date
    */
-  async getAgentReports(date: string, symbol: string): Promise<{
+  async getAgentReports(date: string, symbol: string, taskId?: string): Promise<{
     date: string;
     symbol: string;
     reports: AgentReportsMap;
     count: number;
   }> {
-    return this.fetch(`/recommendations/${date}/${symbol}/agents`);
+    const taskQuery = taskId ? `?task_id=${encodeURIComponent(taskId)}` : '';
+    return this.fetch(`/recommendations/${date}/${symbol}/agents${taskQuery}`);
+  }
+
+  /**
+   * Get agent reports for a stock in a specific task
+   */
+  async getTaskAgentReports(taskId: string, symbol: string): Promise<{
+    task_id: string;
+    symbol: string;
+    reports: AgentReportsMap;
+    count: number;
+  }> {
+    return this.fetch(`/tasks/${encodeURIComponent(taskId)}/${encodeURIComponent(symbol)}/agents`, { noCache: true });
   }
 
   /**
    * Get debate history for a stock on a specific date
    */
-  async getDebateHistory(date: string, symbol: string): Promise<{
+  async getDebateHistory(date: string, symbol: string, taskId?: string): Promise<{
     date: string;
     symbol: string;
     debates: DebatesMap;
   }> {
-    return this.fetch(`/recommendations/${date}/${symbol}/debates`);
+    const taskQuery = taskId ? `?task_id=${encodeURIComponent(taskId)}` : '';
+    return this.fetch(`/recommendations/${date}/${symbol}/debates${taskQuery}`);
+  }
+
+  /**
+   * Get debate history for a stock in a specific task
+   */
+  async getTaskDebateHistory(taskId: string, symbol: string): Promise<{
+    task_id: string;
+    symbol: string;
+    debates: DebatesMap;
+  }> {
+    return this.fetch(`/tasks/${encodeURIComponent(taskId)}/${encodeURIComponent(symbol)}/debates`, { noCache: true });
   }
 
   /**
    * Get data source logs for a stock on a specific date
    */
-  async getDataSources(date: string, symbol: string): Promise<{
+  async getDataSources(date: string, symbol: string, taskId?: string): Promise<{
     date: string;
     symbol: string;
     data_sources: DataSourceLog[];
     count: number;
   }> {
-    return this.fetch(`/recommendations/${date}/${symbol}/data-sources`);
+    const taskQuery = taskId ? `?task_id=${encodeURIComponent(taskId)}` : '';
+    return this.fetch(`/recommendations/${date}/${symbol}/data-sources${taskQuery}`);
+  }
+
+  /**
+   * Get data source logs for a stock in a specific task
+   */
+  async getTaskDataSources(taskId: string, symbol: string): Promise<{
+    task_id: string;
+    symbol: string;
+    data_sources: DataSourceLog[];
+    count: number;
+  }> {
+    return this.fetch(`/tasks/${encodeURIComponent(taskId)}/${encodeURIComponent(symbol)}/data-sources`, { noCache: true });
   }
 
   /**
@@ -238,6 +358,7 @@ class ApiService {
     symbol: string;
     date: string;
     status: string;
+    task_id?: string;
   }> {
     const url = date ? `/analyze/${symbol}?date=${date}` : `/analyze/${symbol}`;
     return this.fetch(url, {
@@ -254,20 +375,15 @@ class ApiService {
   /**
    * Get analysis status for a stock
    */
-  async getAnalysisStatus(symbol: string): Promise<{
-    symbol: string;
-    status: string;
-    progress?: string;
-    error?: string;
-    decision?: string;
-    started_at?: string;
-    completed_at?: string;
-    steps_completed?: number;
-    steps_total?: number;
-    steps_running?: string[];
-    pipeline_steps?: Record<string, { status: string; duration_ms?: number }>;
-  }> {
+  async getAnalysisStatus(symbol: string): Promise<AnalysisStatusResponse> {
     return this.fetch(`/analyze/${symbol}/status`, { noCache: true });
+  }
+
+  /**
+   * Get analysis status for a task ID
+   */
+  async getAnalysisStatusByTask(taskId: string): Promise<AnalysisStatusResponse> {
+    return this.fetch(`/analyze/task/${encodeURIComponent(taskId)}/status`, { noCache: true });
   }
 
   /**
@@ -307,6 +423,7 @@ class ApiService {
     total_stocks: number;
     skipped?: number;
     status: string;
+    task_id?: string;
   }> {
     const url = date ? `/analyze/all?date=${date}` : '/analyze/all';
     return this.fetch(url, {
@@ -320,6 +437,7 @@ class ApiService {
    * Get bulk analysis status
    */
   async getBulkAnalysisStatus(): Promise<{
+    task_id?: string;
     status: string;
     total: number;
     completed: number;
@@ -438,9 +556,10 @@ class ApiService {
   /**
    * Get backtest result for a specific stock and date
    */
-  async getBacktestResult(date: string, symbol: string): Promise<{
+  async getBacktestResult(date: string, symbol: string, taskId?: string): Promise<{
     available: boolean;
     reason?: string;
+    task_id?: string;
     prediction_correct?: boolean;
     actual_return_1d?: number;
     actual_return_1w?: number;
@@ -451,14 +570,16 @@ class ApiService {
     hold_days?: number | null;
     return_at_hold?: number | null;
   }> {
-    return this.fetch(`/backtest/${date}/${symbol}`, { noCache: true });
+    const taskQuery = taskId ? `?task_id=${encodeURIComponent(taskId)}` : '';
+    return this.fetch(`/backtest/${date}/${symbol}${taskQuery}`, { noCache: true });
   }
 
   /**
    * Get all backtest results for a specific date
    */
-  async getBacktestResultsForDate(date: string): Promise<{
+  async getBacktestResultsForDate(date: string, taskId?: string): Promise<{
     date: string;
+    task_id?: string;
     results: Array<{
       symbol: string;
       decision: string;
@@ -471,14 +592,16 @@ class ApiService {
       prediction_correct?: boolean;
     }>;
   }> {
-    return this.fetch(`/backtest/${date}`);
+    const taskQuery = taskId ? `?task_id=${encodeURIComponent(taskId)}` : '';
+    return this.fetch(`/backtest/${date}${taskQuery}`);
   }
 
   /**
    * Get detailed backtest data with live prices, formulas, agent reports
    */
-  async getDetailedBacktest(date: string): Promise<{
+  async getDetailedBacktest(date: string, taskId?: string): Promise<{
     date: string;
+    task_id?: string;
     total_stocks: number;
     stocks: Array<{
       symbol: string;
@@ -502,7 +625,8 @@ class ApiService {
       debate_summary: Record<string, string>;
     }>;
   }> {
-    return this.fetch(`/backtest/${date}/detailed`, { noCache: true });
+    const taskQuery = taskId ? `?task_id=${encodeURIComponent(taskId)}` : '';
+    return this.fetch(`/backtest/${date}/detailed${taskQuery}`, { noCache: true });
   }
 
   /**

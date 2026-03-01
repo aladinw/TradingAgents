@@ -7,7 +7,7 @@ praw
 feedparser
 stockstats
 eodhd
-langgraph
+langgraph>=0.5.4,<0.6.0
 chromadb
 setuptools
 backtrader
@@ -18,11 +18,16 @@ parsel
 requests
 tqdm
 pytz
+psycopg[binary]
 redis
-chainlit
+chainlit>=2.5.5; python_version < "3.12"
 rich
 questionary
 langchain_anthropic
 langchain-google-genai
 jugaad-data
 sentence-transformers
+fastapi
+uvicorn
+pydantic
+python-dotenv

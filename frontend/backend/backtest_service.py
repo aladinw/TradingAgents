@@ -133,7 +133,7 @@ def calculate_backtest_for_recommendation(date: str, symbol: str, decision: str,
 
 
 def calculate_and_save_backtest(date: str, symbol: str, decision: str,
-                                hold_days: int = None) -> Optional[dict]:
+                                hold_days: int = None, task_id: str = None) -> Optional[dict]:
     """Calculate backtest and save to database."""
     result = calculate_backtest_for_recommendation(date, symbol, decision, hold_days)
 
@@ -152,20 +152,24 @@ def calculate_and_save_backtest(date: str, symbol: str, decision: str,
             prediction_correct=result['prediction_correct'],
             hold_days=result.get('hold_days'),
             return_at_hold=result.get('return_at_hold'),
+            task_id=task_id,
         )
 
     return result
 
 
-def backtest_all_recommendations_for_date(date: str) -> dict:
+def backtest_all_recommendations_for_date(date: str = None, task_id: str = None) -> dict:
     """
-    Calculate backtest for all recommendations on a given date.
+    Calculate backtest for all recommendations on a given date or task.
 
     Returns summary statistics.
     """
-    rec = db.get_recommendation_by_date(date)
+    rec = db.get_recommendation_by_date(date=date, task_id=task_id)
     if not rec or 'analysis' not in rec:
-        return {'error': 'No recommendations found for date', 'date': date}
+        return {'error': 'No recommendations found', 'date': date, 'task_id': task_id}
+
+    effective_task_id = task_id or rec.get('task_id')
+    effective_date = rec.get('date') or date
 
     analysis = rec['analysis']  # Dict keyed by symbol
     results = []
@@ -176,13 +180,19 @@ def backtest_all_recommendations_for_date(date: str) -> dict:
         hold_days = stock_data.get('hold_days')
 
         # Check if we already have a backtest result
-        existing = db.get_backtest_result(date, symbol)
+        existing = db.get_backtest_result(date=effective_date, symbol=symbol, task_id=effective_task_id)
         if existing:
             results.append(existing)
             continue
 
         # Calculate new backtest
-        result = calculate_and_save_backtest(date, symbol, decision, hold_days)
+        result = calculate_and_save_backtest(
+            effective_date,
+            symbol,
+            decision,
+            hold_days,
+            task_id=effective_task_id,
+        )
         if result:
             results.append(result)
         else:
@@ -193,7 +203,8 @@ def backtest_all_recommendations_for_date(date: str) -> dict:
     total_with_result = sum(1 for r in results if r.get('prediction_correct') is not None)
 
     return {
-        'date': date,
+        'date': effective_date,
+        'task_id': effective_task_id,
         'total_stocks': len(analysis),
         'calculated': len(results),
         'errors': errors,
@@ -203,27 +214,35 @@ def backtest_all_recommendations_for_date(date: str) -> dict:
     }
 
 
-def get_backtest_data_for_frontend(date: str, symbol: str) -> dict:
+def get_backtest_data_for_frontend(date: str = None, symbol: str = None, task_id: str = None) -> dict:
     """
     Get backtest data formatted for frontend display.
     Includes price history for charts.
     """
-    result = db.get_backtest_result(date, symbol)
+    result = db.get_backtest_result(date=date, symbol=symbol, task_id=task_id)
 
     if not result:
         # Try to calculate it
-        rec = db.get_recommendation_by_date(date)
+        rec = db.get_recommendation_by_date(date=date, task_id=task_id)
         if rec and 'analysis' in rec:
             stock_data = rec['analysis'].get(symbol)
             if stock_data:
-                result = calculate_and_save_backtest(date, symbol, stock_data['decision'], stock_data.get('hold_days'))
+                effective_date = rec.get('date') or date
+                effective_task_id = task_id or rec.get('task_id')
+                result = calculate_and_save_backtest(
+                    effective_date,
+                    symbol,
+                    stock_data['decision'],
+                    stock_data.get('hold_days'),
+                    task_id=effective_task_id,
+                )
 
     if not result:
         return {'available': False, 'reason': 'Could not calculate backtest'}
 
     # Get price history for chart
     try:
-        pred_date = datetime.strptime(date, '%Y-%m-%d')
+        pred_date = datetime.strptime(result.get('date') or date, '%Y-%m-%d')
         yf_symbol = symbol
         ticker = yf.Ticker(yf_symbol)
 
@@ -242,6 +261,7 @@ def get_backtest_data_for_frontend(date: str, symbol: str) -> dict:
 
     return {
         'available': True,
+        'task_id': task_id or result.get('task_id'),
         'prediction_correct': result['prediction_correct'],
         'actual_return_1d': result['return_1d'],
         'actual_return_1w': result['return_1w'],

@@ -1,12 +1,109 @@
-"""SQLite database module for storing stock recommendations."""
-import sqlite3
+"""PostgreSQL database module for storing stock recommendations."""
 import json
+import os
 import re
-from pathlib import Path
+import uuid
 from datetime import datetime
 from typing import Optional
 
-DB_PATH = Path(__file__).parent / "recommendations.db"
+import psycopg
+from dotenv import load_dotenv
+from psycopg.rows import dict_row
+
+
+load_dotenv()
+
+
+_UPSERT_CONFLICT_COLUMNS = {
+    "daily_recommendations": ["task_id"],
+    "stock_analysis": ["task_id", "symbol"],
+    "agent_reports": ["task_id", "symbol", "agent_type"],
+    "debate_history": ["task_id", "symbol", "debate_type"],
+    "pipeline_steps": ["task_id", "symbol", "step_number"],
+    "backtest_results": ["task_id", "symbol"],
+}
+
+
+def _build_database_url() -> str:
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        return database_url
+
+    host = os.getenv("DB_HOST", "localhost")
+    port = os.getenv("DB_PORT", "5432")
+    dbname = os.getenv("DB_NAME", "tradingagents")
+    user = os.getenv("DB_USER", "postgres")
+    password = os.getenv("DB_PASSWORD", "")
+    sslmode = os.getenv("DB_SSLMODE", "prefer")
+
+    if password:
+        return f"postgresql://{user}:{password}@{host}:{port}/{dbname}?sslmode={sslmode}"
+    return f"postgresql://{user}@{host}:{port}/{dbname}?sslmode={sslmode}"
+
+
+def _translate_insert_or_replace(sql: str) -> str:
+    pattern = re.compile(
+        r"INSERT\s+OR\s+REPLACE\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*?)\)\s*VALUES\s*\((.*?)\)",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    def _repl(match: re.Match) -> str:
+        table = match.group(1)
+        columns_raw = match.group(2)
+        values_raw = match.group(3)
+
+        columns = [col.strip() for col in columns_raw.split(",") if col.strip()]
+        conflict_cols = _UPSERT_CONFLICT_COLUMNS.get(table.lower())
+
+        if not conflict_cols:
+            return f"INSERT INTO {table} ({columns_raw}) VALUES ({values_raw})"
+
+        update_cols = [col for col in columns if col not in conflict_cols]
+        if not update_cols:
+            update_cols = columns
+
+        update_clause = ", ".join(f"{col} = EXCLUDED.{col}" for col in update_cols)
+        conflict_clause = ", ".join(conflict_cols)
+
+        return (
+            f"INSERT INTO {table} ({columns_raw}) VALUES ({values_raw}) "
+            f"ON CONFLICT ({conflict_clause}) DO UPDATE SET {update_clause}"
+        )
+
+    return pattern.sub(_repl, sql)
+
+
+def _translate_sql(sql: str) -> str:
+    translated = sql
+    translated = translated.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY")
+    translated = _translate_insert_or_replace(translated)
+    translated = translated.replace("?", "%s")
+    return translated
+
+
+class CompatCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, query, params=None):
+        translated_query = _translate_sql(query)
+        if params is None:
+            return self._cursor.execute(translated_query)
+        return self._cursor.execute(translated_query, params)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class CompatConnection:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def cursor(self, *args, **kwargs):
+        return CompatCursor(self._conn.cursor(*args, **kwargs))
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
 
 
 def sanitize_decision(raw: str) -> str:
@@ -44,10 +141,298 @@ def sanitize_decision(raw: str) -> str:
 
 
 def get_connection():
-    """Get SQLite database connection."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Get PostgreSQL database connection."""
+    conn = psycopg.connect(_build_database_url(), row_factory=dict_row)
+    return CompatConnection(conn)
+
+
+def _make_task_id() -> str:
+    return str(uuid.uuid4())
+
+
+def _ensure_task_exists(task_id: str, task_type: str, analysis_date: str,
+                        request_symbol: str = None, status: str = "pending",
+                        config_json: dict | None = None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO analysis_tasks
+            (task_id, task_type, request_symbol, analysis_date, status, config_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (task_id) DO NOTHING
+            """,
+            (
+                task_id,
+                task_type,
+                request_symbol,
+                analysis_date,
+                status,
+                json.dumps(config_json) if config_json is not None else None,
+                datetime.now().isoformat(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_latest_task_id(date: str = None) -> Optional[str]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        if date:
+            cursor.execute(
+                """
+                SELECT task_id
+                FROM analysis_tasks
+                WHERE analysis_date = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (date,),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT task_id
+                FROM analysis_tasks
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            )
+        row = cursor.fetchone()
+        return row["task_id"] if row else None
+    finally:
+        conn.close()
+
+
+def get_or_create_legacy_task_id(date: str) -> str:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT task_id FROM analysis_tasks
+            WHERE task_type = 'legacy' AND analysis_date = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (date,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return row["task_id"]
+
+        task_id = f"legacy-{date}"
+        cursor.execute(
+            """
+            INSERT INTO analysis_tasks
+            (task_id, task_type, request_symbol, analysis_date, status,
+             total, completed, failed, skipped, config_json,
+             created_at, started_at, completed_at)
+            VALUES (?, 'legacy', NULL, ?, 'completed', 0, 0, 0, 0, ?, ?, ?, ?)
+            ON CONFLICT (task_id) DO NOTHING
+            """,
+            (
+                task_id,
+                date,
+                json.dumps({"source": "migration"}),
+                datetime.now().isoformat(),
+                datetime.now().isoformat(),
+                datetime.now().isoformat(),
+            ),
+        )
+        conn.commit()
+        return task_id
+    finally:
+        conn.close()
+
+
+def _resolve_task_id(task_id: str = None, date: str = None) -> Optional[str]:
+    if task_id:
+        return task_id
+    if date:
+        existing = get_latest_task_id(date)
+        if existing:
+            return existing
+        return get_or_create_legacy_task_id(date)
+    return get_latest_task_id()
+
+
+def _resolve_task_id_for_read(task_id: str = None, date: str = None) -> Optional[str]:
+    if task_id:
+        return task_id
+    if date:
+        return get_latest_task_id(date)
+    return get_latest_task_id()
+
+
+def create_analysis_task(task_type: str, analysis_date: str, request_symbol: str = None,
+                         config_json: dict | None = None, status: str = "pending",
+                         total: int = 0, completed: int = 0, failed: int = 0, skipped: int = 0,
+                         started_at: str = None, completed_at: str = None) -> str:
+    task_id = _make_task_id()
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO analysis_tasks
+            (task_id, task_type, request_symbol, analysis_date, status,
+             total, completed, failed, skipped, config_json,
+             created_at, started_at, completed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task_id,
+                task_type,
+                request_symbol,
+                analysis_date,
+                status,
+                total,
+                completed,
+                failed,
+                skipped,
+                json.dumps(config_json) if config_json is not None else None,
+                datetime.now().isoformat(),
+                started_at,
+                completed_at,
+            ),
+        )
+        conn.commit()
+        return task_id
+    finally:
+        conn.close()
+
+
+def update_analysis_task_status(task_id: str, status: str = None, total: int = None,
+                                completed: int = None, failed: int = None, skipped: int = None,
+                                started_at: str = None, completed_at: str = None):
+    updates = []
+    params = []
+
+    if status is not None:
+        updates.append("status = ?")
+        params.append(status)
+    if total is not None:
+        updates.append("total = ?")
+        params.append(total)
+    if completed is not None:
+        updates.append("completed = ?")
+        params.append(completed)
+    if failed is not None:
+        updates.append("failed = ?")
+        params.append(failed)
+    if skipped is not None:
+        updates.append("skipped = ?")
+        params.append(skipped)
+    if started_at is not None:
+        updates.append("started_at = ?")
+        params.append(started_at)
+    if completed_at is not None:
+        updates.append("completed_at = ?")
+        params.append(completed_at)
+
+    if not updates:
+        return
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        params.append(task_id)
+        cursor.execute(
+            f"UPDATE analysis_tasks SET {', '.join(updates)} WHERE task_id = ?",
+            tuple(params),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_task(task_id: str) -> Optional[dict]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM analysis_tasks WHERE task_id = ?", (task_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "task_id": row["task_id"],
+            "task_type": row["task_type"],
+            "request_symbol": row["request_symbol"],
+            "analysis_date": row["analysis_date"],
+            "status": row["status"],
+            "total": row["total"],
+            "completed": row["completed"],
+            "failed": row["failed"],
+            "skipped": row["skipped"],
+            "config_json": json.loads(row["config_json"]) if row["config_json"] else None,
+            "created_at": row["created_at"],
+            "started_at": row["started_at"],
+            "completed_at": row["completed_at"],
+        }
+    finally:
+        conn.close()
+
+
+def list_tasks(limit: int = 50, offset: int = 0, status: str = None,
+               task_type: str = None, start_date: str = None,
+               end_date: str = None) -> list:
+    where_clauses = []
+    params = []
+
+    if status:
+        where_clauses.append("status = ?")
+        params.append(status)
+    if task_type:
+        where_clauses.append("task_type = ?")
+        params.append(task_type)
+    if start_date:
+        where_clauses.append("analysis_date >= ?")
+        params.append(start_date)
+    if end_date:
+        where_clauses.append("analysis_date <= ?")
+        params.append(end_date)
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            f"""
+            SELECT *
+            FROM analysis_tasks
+            {where_sql}
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            tuple(params + [limit, offset]),
+        )
+        rows = cursor.fetchall()
+        return [
+            {
+                "task_id": row["task_id"],
+                "task_type": row["task_type"],
+                "request_symbol": row["request_symbol"],
+                "analysis_date": row["analysis_date"],
+                "status": row["status"],
+                "total": row["total"],
+                "completed": row["completed"],
+                "failed": row["failed"],
+                "skipped": row["skipped"],
+                "config_json": json.loads(row["config_json"]) if row["config_json"] else None,
+                "created_at": row["created_at"],
+                "started_at": row["started_at"],
+                "completed_at": row["completed_at"],
+            }
+            for row in rows
+        ]
+    finally:
+        conn.close()
 
 
 def init_db():
@@ -55,11 +440,31 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
 
+    # Create analysis task table (one analysis trigger = one task)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS analysis_tasks (
+            task_id TEXT PRIMARY KEY,
+            task_type TEXT NOT NULL,
+            request_symbol TEXT,
+            analysis_date TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            total INTEGER DEFAULT 0,
+            completed INTEGER DEFAULT 0,
+            failed INTEGER DEFAULT 0,
+            skipped INTEGER DEFAULT 0,
+            config_json TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            started_at TEXT,
+            completed_at TEXT
+        )
+    """)
+
     # Create recommendations table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS daily_recommendations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT UNIQUE NOT NULL,
+            task_id TEXT,
+            date TEXT NOT NULL,
             summary_total INTEGER,
             summary_buy INTEGER,
             summary_sell INTEGER,
@@ -74,6 +479,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS stock_analysis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT,
             date TEXT NOT NULL,
             symbol TEXT NOT NULL,
             company_name TEXT,
@@ -81,30 +487,21 @@ def init_db():
             confidence TEXT,
             risk TEXT,
             raw_analysis TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(date, symbol)
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
-    """)
-
-    # Create index for faster queries
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_stock_analysis_date ON stock_analysis(date)
-    """)
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_stock_analysis_symbol ON stock_analysis(symbol)
     """)
 
     # Create agent_reports table (stores each analyst's detailed report)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS agent_reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT,
             date TEXT NOT NULL,
             symbol TEXT NOT NULL,
             agent_type TEXT NOT NULL,
             report_content TEXT,
             data_sources_used TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(date, symbol, agent_type)
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -112,6 +509,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS debate_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT,
             date TEXT NOT NULL,
             symbol TEXT NOT NULL,
             debate_type TEXT NOT NULL,
@@ -122,8 +520,7 @@ def init_db():
             neutral_arguments TEXT,
             judge_decision TEXT,
             full_history TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(date, symbol, debate_type)
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -131,6 +528,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pipeline_steps (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT,
             date TEXT NOT NULL,
             symbol TEXT NOT NULL,
             step_number INTEGER,
@@ -140,21 +538,15 @@ def init_db():
             completed_at TEXT,
             duration_ms INTEGER,
             output_summary TEXT,
-            step_details TEXT,
-            UNIQUE(date, symbol, step_number)
+            step_details TEXT
         )
     """)
-
-    # Add step_details column if it doesn't exist (migration for existing DBs)
-    try:
-        cursor.execute("ALTER TABLE pipeline_steps ADD COLUMN step_details TEXT")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
 
     # Create data_source_logs table (stores what raw data was fetched)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS data_source_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT,
             date TEXT NOT NULL,
             symbol TEXT NOT NULL,
             source_type TEXT,
@@ -168,20 +560,11 @@ def init_db():
         )
     """)
 
-    # Migrate: add method/args columns if missing (existing databases)
-    try:
-        cursor.execute("ALTER TABLE data_source_logs ADD COLUMN method TEXT")
-    except Exception:
-        pass  # Column already exists
-    try:
-        cursor.execute("ALTER TABLE data_source_logs ADD COLUMN args TEXT")
-    except Exception:
-        pass  # Column already exists
-
     # Create backtest_results table (stores calculated backtest accuracy)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS backtest_results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT,
             date TEXT NOT NULL,
             symbol TEXT NOT NULL,
             decision TEXT,
@@ -193,32 +576,121 @@ def init_db():
             return_1w REAL,
             return_1m REAL,
             prediction_correct INTEGER,
-            calculated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(date, symbol)
+            calculated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
+    # Ensure task_id columns exist for existing DBs
+    cursor.execute("ALTER TABLE daily_recommendations ADD COLUMN IF NOT EXISTS task_id TEXT")
+    cursor.execute("ALTER TABLE stock_analysis ADD COLUMN IF NOT EXISTS task_id TEXT")
+    cursor.execute("ALTER TABLE agent_reports ADD COLUMN IF NOT EXISTS task_id TEXT")
+    cursor.execute("ALTER TABLE debate_history ADD COLUMN IF NOT EXISTS task_id TEXT")
+    cursor.execute("ALTER TABLE pipeline_steps ADD COLUMN IF NOT EXISTS task_id TEXT")
+    cursor.execute("ALTER TABLE data_source_logs ADD COLUMN IF NOT EXISTS task_id TEXT")
+    cursor.execute("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS task_id TEXT")
+
+    # Replace date-based uniqueness with task-based uniqueness
+    cursor.execute("ALTER TABLE daily_recommendations DROP CONSTRAINT IF EXISTS daily_recommendations_date_key")
+    cursor.execute("ALTER TABLE stock_analysis DROP CONSTRAINT IF EXISTS stock_analysis_date_symbol_key")
+    cursor.execute("ALTER TABLE agent_reports DROP CONSTRAINT IF EXISTS agent_reports_date_symbol_agent_type_key")
+    cursor.execute("ALTER TABLE debate_history DROP CONSTRAINT IF EXISTS debate_history_date_symbol_debate_type_key")
+    cursor.execute("ALTER TABLE pipeline_steps DROP CONSTRAINT IF EXISTS pipeline_steps_date_symbol_step_number_key")
+    cursor.execute("ALTER TABLE backtest_results DROP CONSTRAINT IF EXISTS backtest_results_date_symbol_key")
+
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_recommendations_task_id_unique ON daily_recommendations(task_id)")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_analysis_task_symbol_unique ON stock_analysis(task_id, symbol)")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_reports_task_symbol_type_unique ON agent_reports(task_id, symbol, agent_type)")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_debate_history_task_symbol_type_unique ON debate_history(task_id, symbol, debate_type)")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pipeline_steps_task_symbol_step_unique ON pipeline_steps(task_id, symbol, step_number)")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_backtest_results_task_symbol_unique ON backtest_results(task_id, symbol)")
+
+    # Backfill legacy rows into task timeline (one legacy task per date)
+    cursor.execute(
+        """
+        SELECT DISTINCT date FROM (
+            SELECT date FROM daily_recommendations WHERE task_id IS NULL
+            UNION SELECT date FROM stock_analysis WHERE task_id IS NULL
+            UNION SELECT date FROM agent_reports WHERE task_id IS NULL
+            UNION SELECT date FROM debate_history WHERE task_id IS NULL
+            UNION SELECT date FROM pipeline_steps WHERE task_id IS NULL
+            UNION SELECT date FROM data_source_logs WHERE task_id IS NULL
+            UNION SELECT date FROM backtest_results WHERE task_id IS NULL
+        ) t
+        WHERE date IS NOT NULL
+        """
+    )
+    legacy_dates = [row["date"] for row in cursor.fetchall()]
+    for legacy_date in legacy_dates:
+        legacy_task_id = f"legacy-{legacy_date}"
+        cursor.execute(
+            """
+            INSERT INTO analysis_tasks
+            (task_id, task_type, request_symbol, analysis_date, status,
+             total, completed, failed, skipped, config_json,
+             created_at, started_at, completed_at)
+            VALUES (?, 'legacy', NULL, ?, 'completed', 0, 0, 0, 0, ?, ?, ?, ?)
+            ON CONFLICT (task_id) DO NOTHING
+            """,
+            (
+                legacy_task_id,
+                legacy_date,
+                json.dumps({"source": "migration"}),
+                datetime.now().isoformat(),
+                datetime.now().isoformat(),
+                datetime.now().isoformat(),
+            ),
+        )
+        cursor.execute("UPDATE daily_recommendations SET task_id = ? WHERE task_id IS NULL AND date = ?", (legacy_task_id, legacy_date))
+        cursor.execute("UPDATE stock_analysis SET task_id = ? WHERE task_id IS NULL AND date = ?", (legacy_task_id, legacy_date))
+        cursor.execute("UPDATE agent_reports SET task_id = ? WHERE task_id IS NULL AND date = ?", (legacy_task_id, legacy_date))
+        cursor.execute("UPDATE debate_history SET task_id = ? WHERE task_id IS NULL AND date = ?", (legacy_task_id, legacy_date))
+        cursor.execute("UPDATE pipeline_steps SET task_id = ? WHERE task_id IS NULL AND date = ?", (legacy_task_id, legacy_date))
+        cursor.execute("UPDATE data_source_logs SET task_id = ? WHERE task_id IS NULL AND date = ?", (legacy_task_id, legacy_date))
+        cursor.execute("UPDATE backtest_results SET task_id = ? WHERE task_id IS NULL AND date = ?", (legacy_task_id, legacy_date))
+
+    # Add step_details column if it doesn't exist (migration for existing DBs)
+    try:
+        cursor.execute("ALTER TABLE pipeline_steps ADD COLUMN IF NOT EXISTS step_details TEXT")
+    except Exception:
+        pass  # Column already exists
+
+    # Migrate: add method/args columns if missing (existing databases)
+    try:
+        cursor.execute("ALTER TABLE data_source_logs ADD COLUMN IF NOT EXISTS method TEXT")
+    except Exception:
+        pass  # Column already exists
+    try:
+        cursor.execute("ALTER TABLE data_source_logs ADD COLUMN IF NOT EXISTS args TEXT")
+    except Exception:
+        pass  # Column already exists
+
     # Add hold_days column if it doesn't exist (migration for existing DBs)
     try:
-        cursor.execute("ALTER TABLE stock_analysis ADD COLUMN hold_days INTEGER")
-    except sqlite3.OperationalError:
+        cursor.execute("ALTER TABLE stock_analysis ADD COLUMN IF NOT EXISTS hold_days INTEGER")
+    except Exception:
         pass  # Column already exists
     try:
-        cursor.execute("ALTER TABLE backtest_results ADD COLUMN hold_days INTEGER")
-    except sqlite3.OperationalError:
+        cursor.execute("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS hold_days INTEGER")
+    except Exception:
         pass  # Column already exists
     try:
-        cursor.execute("ALTER TABLE backtest_results ADD COLUMN return_at_hold REAL")
-        # New column added — delete stale backtest data so it gets recalculated with return_at_hold
-        cursor.execute("DELETE FROM backtest_results")
-        print("Migration: Added return_at_hold column, cleared stale backtest data for recalculation")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
+        cursor.execute(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'backtest_results' AND column_name = 'return_at_hold'"
+        )
+        has_return_at_hold = cursor.fetchone() is not None
+        if not has_return_at_hold:
+            cursor.execute("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS return_at_hold REAL")
+            # New column added — delete stale backtest data so it gets recalculated with return_at_hold
+            cursor.execute("DELETE FROM backtest_results")
+            print("Migration: Added return_at_hold column, cleared stale backtest data for recalculation")
+    except Exception:
+        pass  # Keep init idempotent even if metadata check fails
 
     # Add rank column if it doesn't exist (migration for existing DBs)
     try:
-        cursor.execute("ALTER TABLE stock_analysis ADD COLUMN rank INTEGER")
-    except sqlite3.OperationalError:
+        cursor.execute("ALTER TABLE stock_analysis ADD COLUMN IF NOT EXISTS rank INTEGER")
+    except Exception:
         pass  # Column already exists
 
     # Create indexes for new tables
@@ -283,7 +755,6 @@ def _fix_default_hold_days():
         return None
 
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     try:
@@ -445,18 +916,22 @@ def _cleanup_bad_backtest_data():
 
 
 def save_recommendation(date: str, analysis_data: dict, summary: dict,
-                        top_picks: list, stocks_to_avoid: list):
+                        top_picks: list, stocks_to_avoid: list, task_id: str = None):
     """Save a daily recommendation to the database."""
+    resolved_task_id = _resolve_task_id(task_id=task_id, date=date)
+    if not resolved_task_id:
+        resolved_task_id = get_or_create_legacy_task_id(date)
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        # Insert or replace daily recommendation
         cursor.execute("""
             INSERT OR REPLACE INTO daily_recommendations
-            (date, summary_total, summary_buy, summary_sell, summary_hold, top_picks, stocks_to_avoid)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (task_id, date, summary_total, summary_buy, summary_sell, summary_hold, top_picks, stocks_to_avoid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            resolved_task_id,
             date,
             summary.get('total', 0),
             summary.get('buy', 0),
@@ -466,13 +941,13 @@ def save_recommendation(date: str, analysis_data: dict, summary: dict,
             json.dumps(stocks_to_avoid)
         ))
 
-        # Insert stock analysis for each stock
         for symbol, analysis in analysis_data.items():
             cursor.execute("""
                 INSERT OR REPLACE INTO stock_analysis
-                (date, symbol, company_name, decision, confidence, risk, raw_analysis, hold_days)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (task_id, date, symbol, company_name, decision, confidence, risk, raw_analysis, hold_days)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
+                resolved_task_id,
                 date,
                 symbol,
                 analysis.get('company_name', ''),
@@ -488,7 +963,7 @@ def save_recommendation(date: str, analysis_data: dict, summary: dict,
         conn.close()
 
 
-def save_single_stock_analysis(date: str, symbol: str, analysis: dict):
+def save_single_stock_analysis(date: str, symbol: str, analysis: dict, task_id: str = None):
     """Save analysis for a single stock.
 
     Args:
@@ -496,15 +971,20 @@ def save_single_stock_analysis(date: str, symbol: str, analysis: dict):
         symbol: Stock symbol
         analysis: Dict with keys: company_name, decision, confidence, risk, raw_analysis, hold_days
     """
+    resolved_task_id = _resolve_task_id(task_id=task_id, date=date)
+    if not resolved_task_id:
+        resolved_task_id = get_or_create_legacy_task_id(date)
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute("""
             INSERT OR REPLACE INTO stock_analysis
-            (date, symbol, company_name, decision, confidence, risk, raw_analysis, hold_days)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (task_id, date, symbol, company_name, decision, confidence, risk, raw_analysis, hold_days)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            resolved_task_id,
             date,
             symbol,
             analysis.get('company_name', symbol),
@@ -519,8 +999,8 @@ def save_single_stock_analysis(date: str, symbol: str, analysis: dict):
         conn.close()
 
 
-def get_analyzed_symbols_for_date(date: str) -> list:
-    """Get list of symbols that already have analysis for a given date.
+def get_analyzed_symbols_for_date(date: str, task_id: str = None) -> list:
+    """Get list of symbols that already have analysis for a given date/task.
 
     Used by bulk analysis to skip already-completed stocks when resuming.
     """
@@ -528,31 +1008,48 @@ def get_analyzed_symbols_for_date(date: str) -> list:
     cursor = conn.cursor()
 
     try:
-        cursor.execute("SELECT symbol FROM stock_analysis WHERE date = ?", (date,))
+        if task_id:
+            cursor.execute("SELECT symbol FROM stock_analysis WHERE task_id = ?", (task_id,))
+        else:
+            cursor.execute("SELECT symbol FROM stock_analysis WHERE date = ?", (date,))
         return [row['symbol'] for row in cursor.fetchall()]
     finally:
         conn.close()
 
 
-def get_recommendation_by_date(date: str) -> Optional[dict]:
-    """Get recommendation for a specific date."""
+def get_recommendation_by_date(date: str = None, task_id: str = None) -> Optional[dict]:
+    """Get recommendation for a specific date or task."""
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        # Get daily summary
-        cursor.execute("""
-            SELECT * FROM daily_recommendations WHERE date = ?
-        """, (date,))
-        row = cursor.fetchone()
+        resolved_task_id = _resolve_task_id_for_read(task_id=task_id, date=date)
 
-        # Get stock analysis for this date
-        cursor.execute("""
-            SELECT * FROM stock_analysis WHERE date = ?
-        """, (date,))
-        analysis_rows = cursor.fetchall()
+        if resolved_task_id:
+            cursor.execute("""
+                SELECT * FROM daily_recommendations WHERE task_id = ?
+            """, (resolved_task_id,))
+            row = cursor.fetchone()
 
-        # If no daily_recommendations AND no stock_analysis, return None
+            cursor.execute("""
+                SELECT * FROM stock_analysis WHERE task_id = ?
+            """, (resolved_task_id,))
+            analysis_rows = cursor.fetchall()
+            effective_date = row['date'] if row else date
+        else:
+            if not date:
+                return None
+            cursor.execute("""
+                SELECT * FROM daily_recommendations WHERE date = ?
+            """, (date,))
+            row = cursor.fetchone()
+
+            cursor.execute("""
+                SELECT * FROM stock_analysis WHERE date = ?
+            """, (date,))
+            analysis_rows = cursor.fetchall()
+            effective_date = date
+
         if not row and not analysis_rows:
             return None
 
@@ -572,6 +1069,7 @@ def get_recommendation_by_date(date: str) -> Optional[dict]:
 
         if row:
             return {
+                'task_id': row['task_id'] if 'task_id' in row.keys() else resolved_task_id,
                 'date': row['date'],
                 'analysis': analysis,
                 'summary': {
@@ -584,12 +1082,12 @@ def get_recommendation_by_date(date: str) -> Optional[dict]:
                 'stocks_to_avoid': json.loads(row['stocks_to_avoid']) if row['stocks_to_avoid'] else []
             }
 
-        # Fallback: build summary from stock_analysis when daily_recommendations is missing
         buy_count = sum(1 for a in analysis.values() if a['decision'] == 'BUY')
         sell_count = sum(1 for a in analysis.values() if a['decision'] == 'SELL')
         hold_count = sum(1 for a in analysis.values() if a['decision'] == 'HOLD')
         return {
-            'date': date,
+            'task_id': resolved_task_id,
+            'date': effective_date,
             'analysis': analysis,
             'summary': {
                 'total': len(analysis),
@@ -606,6 +1104,10 @@ def get_recommendation_by_date(date: str) -> Optional[dict]:
 
 def get_latest_recommendation() -> Optional[dict]:
     """Get the most recent recommendation."""
+    latest_task_id = get_latest_task_id()
+    if latest_task_id:
+        return get_recommendation_by_date(task_id=latest_task_id)
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -648,10 +1150,10 @@ def get_stock_history(symbol: str) -> list:
 
     try:
         cursor.execute("""
-            SELECT date, decision, confidence, risk, hold_days, rank
+            SELECT date, task_id, decision, confidence, risk, hold_days, rank
             FROM stock_analysis
             WHERE symbol = ?
-            ORDER BY date DESC
+            ORDER BY date DESC, created_at DESC
         """, (symbol,))
 
         results = []
@@ -659,6 +1161,7 @@ def get_stock_history(symbol: str) -> list:
             decision = sanitize_decision(row['decision'])
             results.append({
                 'date': row['date'],
+                'task_id': row['task_id'] if 'task_id' in row.keys() else None,
                 'decision': decision,
                 'confidence': row['confidence'] or 'MEDIUM',
                 'risk': row['risk'] or 'MEDIUM',
@@ -673,23 +1176,29 @@ def get_stock_history(symbol: str) -> list:
 def get_all_recommendations() -> list:
     """Get all daily recommendations."""
     dates = get_all_dates()
-    return [get_recommendation_by_date(date) for date in dates]
+    return [get_recommendation_by_date(date=date) for date in dates]
 
 
 # ============== Pipeline Data Functions ==============
 
 def save_agent_report(date: str, symbol: str, agent_type: str,
-                      report_content: str, data_sources_used: list = None):
+                      report_content: str, data_sources_used: list = None,
+                      task_id: str = None):
     """Save an individual agent's report."""
+    resolved_task_id = _resolve_task_id(task_id=task_id, date=date)
+    if not resolved_task_id:
+        resolved_task_id = get_or_create_legacy_task_id(date)
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute("""
             INSERT OR REPLACE INTO agent_reports
-            (date, symbol, agent_type, report_content, data_sources_used)
-            VALUES (?, ?, ?, ?, ?)
+            (task_id, date, symbol, agent_type, report_content, data_sources_used)
+            VALUES (?, ?, ?, ?, ?, ?)
         """, (
+            resolved_task_id,
             date, symbol, agent_type, report_content,
             json.dumps(data_sources_used) if data_sources_used else '[]'
         ))
@@ -698,7 +1207,7 @@ def save_agent_report(date: str, symbol: str, agent_type: str,
         conn.close()
 
 
-def save_agent_reports_bulk(date: str, symbol: str, reports: dict):
+def save_agent_reports_bulk(date: str, symbol: str, reports: dict, task_id: str = None):
     """Save all agent reports for a stock at once.
 
     Args:
@@ -706,6 +1215,10 @@ def save_agent_reports_bulk(date: str, symbol: str, reports: dict):
         symbol: Stock symbol
         reports: Dict with keys 'market', 'news', 'social_media', 'fundamentals'
     """
+    resolved_task_id = _resolve_task_id(task_id=task_id, date=date)
+    if not resolved_task_id:
+        resolved_task_id = get_or_create_legacy_task_id(date)
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -715,31 +1228,39 @@ def save_agent_reports_bulk(date: str, symbol: str, reports: dict):
                 report_content = report_data
                 data_sources = []
             else:
-                report_content = report_data.get('content', '')
+                report_content = report_data.get('content') or report_data.get('report_content', '')
                 data_sources = report_data.get('data_sources', [])
 
             cursor.execute("""
                 INSERT OR REPLACE INTO agent_reports
-                (date, symbol, agent_type, report_content, data_sources_used)
-                VALUES (?, ?, ?, ?, ?)
-            """, (date, symbol, agent_type, report_content, json.dumps(data_sources)))
+                (task_id, date, symbol, agent_type, report_content, data_sources_used)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (resolved_task_id, date, symbol, agent_type, report_content, json.dumps(data_sources)))
 
         conn.commit()
     finally:
         conn.close()
 
 
-def get_agent_reports(date: str, symbol: str) -> dict:
-    """Get all agent reports for a stock on a date."""
+def get_agent_reports(date: str = None, symbol: str = None, task_id: str = None) -> dict:
+    """Get all agent reports for a stock on a date/task."""
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        cursor.execute("""
-            SELECT agent_type, report_content, data_sources_used, created_at
-            FROM agent_reports
-            WHERE date = ? AND symbol = ?
-        """, (date, symbol))
+        resolved_task_id = _resolve_task_id_for_read(task_id=task_id, date=date)
+        if resolved_task_id:
+            cursor.execute("""
+                SELECT agent_type, report_content, data_sources_used, created_at
+                FROM agent_reports
+                WHERE task_id = ? AND symbol = ?
+            """, (resolved_task_id, symbol))
+        else:
+            cursor.execute("""
+                SELECT agent_type, report_content, data_sources_used, created_at
+                FROM agent_reports
+                WHERE date = ? AND symbol = ?
+            """, (date, symbol))
 
         reports = {}
         for row in cursor.fetchall():
@@ -758,19 +1279,24 @@ def save_debate_history(date: str, symbol: str, debate_type: str,
                         bull_arguments: str = None, bear_arguments: str = None,
                         risky_arguments: str = None, safe_arguments: str = None,
                         neutral_arguments: str = None, judge_decision: str = None,
-                        full_history: str = None):
+                        full_history: str = None, task_id: str = None):
     """Save debate history for investment or risk debate."""
+    resolved_task_id = _resolve_task_id(task_id=task_id, date=date)
+    if not resolved_task_id:
+        resolved_task_id = get_or_create_legacy_task_id(date)
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute("""
             INSERT OR REPLACE INTO debate_history
-            (date, symbol, debate_type, bull_arguments, bear_arguments,
+            (task_id, date, symbol, debate_type, bull_arguments, bear_arguments,
              risky_arguments, safe_arguments, neutral_arguments,
              judge_decision, full_history)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            resolved_task_id,
             date, symbol, debate_type,
             bull_arguments, bear_arguments,
             risky_arguments, safe_arguments, neutral_arguments,
@@ -781,16 +1307,23 @@ def save_debate_history(date: str, symbol: str, debate_type: str,
         conn.close()
 
 
-def get_debate_history(date: str, symbol: str) -> dict:
-    """Get all debate history for a stock on a date."""
+def get_debate_history(date: str = None, symbol: str = None, task_id: str = None) -> dict:
+    """Get all debate history for a stock on a date/task."""
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        cursor.execute("""
-            SELECT * FROM debate_history
-            WHERE date = ? AND symbol = ?
-        """, (date, symbol))
+        resolved_task_id = _resolve_task_id_for_read(task_id=task_id, date=date)
+        if resolved_task_id:
+            cursor.execute("""
+                SELECT * FROM debate_history
+                WHERE task_id = ? AND symbol = ?
+            """, (resolved_task_id, symbol))
+        else:
+            cursor.execute("""
+                SELECT * FROM debate_history
+                WHERE date = ? AND symbol = ?
+            """, (date, symbol))
 
         debates = {}
         for row in cursor.fetchall():
@@ -812,18 +1345,24 @@ def get_debate_history(date: str, symbol: str) -> dict:
 
 def save_pipeline_step(date: str, symbol: str, step_number: int, step_name: str,
                        status: str, started_at: str = None, completed_at: str = None,
-                       duration_ms: int = None, output_summary: str = None):
+                       duration_ms: int = None, output_summary: str = None,
+                       task_id: str = None):
     """Save a pipeline step status."""
+    resolved_task_id = _resolve_task_id(task_id=task_id, date=date)
+    if not resolved_task_id:
+        resolved_task_id = get_or_create_legacy_task_id(date)
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute("""
             INSERT OR REPLACE INTO pipeline_steps
-            (date, symbol, step_number, step_name, status,
+            (task_id, date, symbol, step_number, step_name, status,
              started_at, completed_at, duration_ms, output_summary)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            resolved_task_id,
             date, symbol, step_number, step_name, status,
             started_at, completed_at, duration_ms, output_summary
         ))
@@ -832,7 +1371,7 @@ def save_pipeline_step(date: str, symbol: str, step_number: int, step_name: str,
         conn.close()
 
 
-def save_pipeline_steps_bulk(date: str, symbol: str, steps: list):
+def save_pipeline_steps_bulk(date: str, symbol: str, steps: list, task_id: str = None):
     """Save all pipeline steps at once.
 
     Args:
@@ -840,6 +1379,10 @@ def save_pipeline_steps_bulk(date: str, symbol: str, steps: list):
         symbol: Stock symbol
         steps: List of step dicts with step_number, step_name, status, etc.
     """
+    resolved_task_id = _resolve_task_id(task_id=task_id, date=date)
+    if not resolved_task_id:
+        resolved_task_id = get_or_create_legacy_task_id(date)
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -850,10 +1393,11 @@ def save_pipeline_steps_bulk(date: str, symbol: str, steps: list):
                 step_details = json.dumps(step_details)
             cursor.execute("""
                 INSERT OR REPLACE INTO pipeline_steps
-                (date, symbol, step_number, step_name, status,
+                (task_id, date, symbol, step_number, step_name, status,
                  started_at, completed_at, duration_ms, output_summary, step_details)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
+                resolved_task_id,
                 date, symbol,
                 step.get('step_number'),
                 step.get('step_name'),
@@ -869,17 +1413,25 @@ def save_pipeline_steps_bulk(date: str, symbol: str, steps: list):
         conn.close()
 
 
-def get_pipeline_steps(date: str, symbol: str) -> list:
-    """Get all pipeline steps for a stock on a date."""
+def get_pipeline_steps(date: str = None, symbol: str = None, task_id: str = None) -> list:
+    """Get all pipeline steps for a stock on a date/task."""
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        cursor.execute("""
-            SELECT * FROM pipeline_steps
-            WHERE date = ? AND symbol = ?
-            ORDER BY step_number
-        """, (date, symbol))
+        resolved_task_id = _resolve_task_id_for_read(task_id=task_id, date=date)
+        if resolved_task_id:
+            cursor.execute("""
+                SELECT * FROM pipeline_steps
+                WHERE task_id = ? AND symbol = ?
+                ORDER BY step_number
+            """, (resolved_task_id, symbol))
+        else:
+            cursor.execute("""
+                SELECT * FROM pipeline_steps
+                WHERE date = ? AND symbol = ?
+                ORDER BY step_number
+            """, (date, symbol))
 
         results = []
         for row in cursor.fetchall():
@@ -908,18 +1460,23 @@ def get_pipeline_steps(date: str, symbol: str) -> list:
 def save_data_source_log(date: str, symbol: str, source_type: str,
                          source_name: str, data_fetched: dict = None,
                          fetch_timestamp: str = None, success: bool = True,
-                         error_message: str = None):
+                         error_message: str = None, task_id: str = None):
     """Log a data source fetch."""
+    resolved_task_id = _resolve_task_id(task_id=task_id, date=date)
+    if not resolved_task_id:
+        resolved_task_id = get_or_create_legacy_task_id(date)
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute("""
             INSERT INTO data_source_logs
-            (date, symbol, source_type, source_name, data_fetched,
+            (task_id, date, symbol, source_type, source_name, data_fetched,
              fetch_timestamp, success, error_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            resolved_task_id,
             date, symbol, source_type, source_name,
             json.dumps(data_fetched) if data_fetched else None,
             fetch_timestamp or datetime.now().isoformat(),
@@ -931,8 +1488,12 @@ def save_data_source_log(date: str, symbol: str, source_type: str,
         conn.close()
 
 
-def save_data_source_logs_bulk(date: str, symbol: str, logs: list):
+def save_data_source_logs_bulk(date: str, symbol: str, logs: list, task_id: str = None):
     """Save multiple data source logs at once."""
+    resolved_task_id = _resolve_task_id(task_id=task_id, date=date)
+    if not resolved_task_id:
+        resolved_task_id = get_or_create_legacy_task_id(date)
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -940,10 +1501,11 @@ def save_data_source_logs_bulk(date: str, symbol: str, logs: list):
         for log in logs:
             cursor.execute("""
                 INSERT INTO data_source_logs
-                (date, symbol, source_type, source_name, method, args, data_fetched,
+                (task_id, date, symbol, source_type, source_name, method, args, data_fetched,
                  fetch_timestamp, success, error_message)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
+                resolved_task_id,
                 date, symbol,
                 log.get('source_type'),
                 log.get('source_name'),
@@ -959,18 +1521,26 @@ def save_data_source_logs_bulk(date: str, symbol: str, logs: list):
         conn.close()
 
 
-def get_data_source_logs(date: str, symbol: str) -> list:
-    """Get all data source logs for a stock on a date.
+def get_data_source_logs(date: str = None, symbol: str = None, task_id: str = None) -> list:
+    """Get all data source logs for a stock on a date/task.
     Falls back to generating entries from agent_reports if no explicit logs exist."""
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        cursor.execute("""
-            SELECT * FROM data_source_logs
-            WHERE date = ? AND symbol = ?
-            ORDER BY fetch_timestamp
-        """, (date, symbol))
+        resolved_task_id = _resolve_task_id_for_read(task_id=task_id, date=date)
+        if resolved_task_id:
+            cursor.execute("""
+                SELECT * FROM data_source_logs
+                WHERE task_id = ? AND symbol = ?
+                ORDER BY fetch_timestamp
+            """, (resolved_task_id, symbol))
+        else:
+            cursor.execute("""
+                SELECT * FROM data_source_logs
+                WHERE date = ? AND symbol = ?
+                ORDER BY fetch_timestamp
+            """, (date, symbol))
 
         logs = [
             {
@@ -994,14 +1564,22 @@ def get_data_source_logs(date: str, symbol: str) -> list:
             'market': ('market_data', 'Yahoo Finance'),
             'news': ('news', 'Google News'),
             'social_media': ('social_media', 'Social Sentiment'),
+            'social': ('social_media', 'Social Sentiment'),
             'fundamentals': ('fundamentals', 'Financial Data'),
         }
 
-        cursor.execute("""
-            SELECT agent_type, report_content, created_at
-            FROM agent_reports
-            WHERE date = ? AND symbol = ?
-        """, (date, symbol))
+        if resolved_task_id:
+            cursor.execute("""
+                SELECT agent_type, report_content, created_at
+                FROM agent_reports
+                WHERE task_id = ? AND symbol = ?
+            """, (resolved_task_id, symbol))
+        else:
+            cursor.execute("""
+                SELECT agent_type, report_content, created_at
+                FROM agent_reports
+                WHERE date = ? AND symbol = ?
+            """, (date, symbol))
 
         generated = []
         for row in cursor.fetchall():
@@ -1022,19 +1600,21 @@ def get_data_source_logs(date: str, symbol: str) -> list:
         conn.close()
 
 
-def get_full_pipeline_data(date: str, symbol: str) -> dict:
-    """Get complete pipeline data for a stock on a date."""
+def get_full_pipeline_data(date: str = None, symbol: str = None, task_id: str = None) -> dict:
+    """Get complete pipeline data for a stock on a date/task."""
+    resolved_task_id = _resolve_task_id_for_read(task_id=task_id, date=date)
     return {
+        'task_id': resolved_task_id,
         'date': date,
         'symbol': symbol,
-        'agent_reports': get_agent_reports(date, symbol),
-        'debates': get_debate_history(date, symbol),
-        'pipeline_steps': get_pipeline_steps(date, symbol),
-        'data_sources': get_data_source_logs(date, symbol)
+        'agent_reports': get_agent_reports(date=date, symbol=symbol, task_id=resolved_task_id),
+        'debates': get_debate_history(date=date, symbol=symbol, task_id=resolved_task_id),
+        'pipeline_steps': get_pipeline_steps(date=date, symbol=symbol, task_id=resolved_task_id),
+        'data_sources': get_data_source_logs(date=date, symbol=symbol, task_id=resolved_task_id)
     }
 
 
-def save_full_pipeline_data(date: str, symbol: str, pipeline_data: dict):
+def save_full_pipeline_data(date: str, symbol: str, pipeline_data: dict, task_id: str = None):
     """Save complete pipeline data for a stock.
 
     Args:
@@ -1043,7 +1623,7 @@ def save_full_pipeline_data(date: str, symbol: str, pipeline_data: dict):
         pipeline_data: Dict containing agent_reports, debates, pipeline_steps, data_sources
     """
     if 'agent_reports' in pipeline_data:
-        save_agent_reports_bulk(date, symbol, pipeline_data['agent_reports'])
+        save_agent_reports_bulk(date, symbol, pipeline_data['agent_reports'], task_id=task_id)
 
     if 'investment_debate' in pipeline_data:
         debate = pipeline_data['investment_debate']
@@ -1052,7 +1632,8 @@ def save_full_pipeline_data(date: str, symbol: str, pipeline_data: dict):
             bull_arguments=debate.get('bull_history'),
             bear_arguments=debate.get('bear_history'),
             judge_decision=debate.get('judge_decision'),
-            full_history=debate.get('history')
+            full_history=debate.get('history'),
+            task_id=task_id,
         )
 
     if 'risk_debate' in pipeline_data:
@@ -1063,54 +1644,78 @@ def save_full_pipeline_data(date: str, symbol: str, pipeline_data: dict):
             safe_arguments=debate.get('safe_history'),
             neutral_arguments=debate.get('neutral_history'),
             judge_decision=debate.get('judge_decision'),
-            full_history=debate.get('history')
+            full_history=debate.get('history'),
+            task_id=task_id,
         )
 
     if 'pipeline_steps' in pipeline_data:
-        save_pipeline_steps_bulk(date, symbol, pipeline_data['pipeline_steps'])
+        save_pipeline_steps_bulk(date, symbol, pipeline_data['pipeline_steps'], task_id=task_id)
 
     if 'data_sources' in pipeline_data:
-        save_data_source_logs_bulk(date, symbol, pipeline_data['data_sources'])
+        save_data_source_logs_bulk(date, symbol, pipeline_data['data_sources'], task_id=task_id)
 
 
-def get_pipeline_summary_for_date(date: str) -> list:
-    """Get pipeline summary for all stocks on a date."""
+def get_pipeline_summary_for_date(date: str, task_id: str = None) -> list:
+    """Get pipeline summary for all stocks on a date/task."""
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        # Get all symbols for this date
-        cursor.execute("""
-            SELECT DISTINCT symbol FROM stock_analysis WHERE date = ?
-        """, (date,))
-        symbols = [row['symbol'] for row in cursor.fetchall()]
+        resolved_task_id = _resolve_task_id_for_read(task_id=task_id, date=date)
+        if resolved_task_id:
+            cursor.execute("""
+                SELECT DISTINCT symbol FROM stock_analysis WHERE task_id = ?
+            """, (resolved_task_id,))
+            symbols = [row['symbol'] for row in cursor.fetchall()]
 
-        # Batch fetch all pipeline steps for the date (avoids N+1)
-        cursor.execute("""
-            SELECT symbol, step_name, status FROM pipeline_steps
-            WHERE date = ?
-            ORDER BY symbol, step_number
-        """, (date,))
-        all_steps = cursor.fetchall()
+            cursor.execute("""
+                SELECT symbol, step_name, status FROM pipeline_steps
+                WHERE task_id = ?
+                ORDER BY symbol, step_number
+            """, (resolved_task_id,))
+            all_steps = cursor.fetchall()
+
+            cursor.execute("""
+                SELECT symbol, COUNT(*) as count FROM agent_reports
+                WHERE task_id = ?
+                GROUP BY symbol
+            """, (resolved_task_id,))
+            agent_counts = {row['symbol']: row['count'] for row in cursor.fetchall()}
+
+            cursor.execute("""
+                SELECT DISTINCT symbol FROM debate_history WHERE task_id = ?
+            """, (resolved_task_id,))
+            symbols_with_debates = {row['symbol'] for row in cursor.fetchall()}
+        else:
+            cursor.execute("""
+                SELECT DISTINCT symbol FROM stock_analysis WHERE date = ?
+            """, (date,))
+            symbols = [row['symbol'] for row in cursor.fetchall()]
+
+            cursor.execute("""
+                SELECT symbol, step_name, status FROM pipeline_steps
+                WHERE date = ?
+                ORDER BY symbol, step_number
+            """, (date,))
+            all_steps = cursor.fetchall()
+
+            cursor.execute("""
+                SELECT symbol, COUNT(*) as count FROM agent_reports
+                WHERE date = ?
+                GROUP BY symbol
+            """, (date,))
+            agent_counts = {row['symbol']: row['count'] for row in cursor.fetchall()}
+
+            cursor.execute("""
+                SELECT DISTINCT symbol FROM debate_history WHERE date = ?
+            """, (date,))
+            symbols_with_debates = {row['symbol'] for row in cursor.fetchall()}
+
         steps_by_symbol = {}
         for row in all_steps:
             if row['symbol'] not in steps_by_symbol:
                 steps_by_symbol[row['symbol']] = []
             steps_by_symbol[row['symbol']].append({'step_name': row['step_name'], 'status': row['status']})
-
-        # Batch fetch agent report counts (avoids N+1)
-        cursor.execute("""
-            SELECT symbol, COUNT(*) as count FROM agent_reports
-            WHERE date = ?
-            GROUP BY symbol
-        """, (date,))
-        agent_counts = {row['symbol']: row['count'] for row in cursor.fetchall()}
-
-        # Batch fetch debates existence (avoids N+1)
-        cursor.execute("""
-            SELECT DISTINCT symbol FROM debate_history WHERE date = ?
-        """, (date,))
-        symbols_with_debates = {row['symbol'] for row in cursor.fetchall()}
 
         summaries = []
         for symbol in symbols:
@@ -1131,19 +1736,25 @@ def save_backtest_result(date: str, symbol: str, decision: str,
                          price_1w_later: float = None, price_1m_later: float = None,
                          return_1d: float = None, return_1w: float = None,
                          return_1m: float = None, prediction_correct: bool = None,
-                         hold_days: int = None, return_at_hold: float = None):
+                         hold_days: int = None, return_at_hold: float = None,
+                         task_id: str = None):
     """Save a backtest result for a stock recommendation."""
+    resolved_task_id = _resolve_task_id(task_id=task_id, date=date)
+    if not resolved_task_id:
+        resolved_task_id = get_or_create_legacy_task_id(date)
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute("""
             INSERT OR REPLACE INTO backtest_results
-            (date, symbol, decision, price_at_prediction,
+            (task_id, date, symbol, decision, price_at_prediction,
              price_1d_later, price_1w_later, price_1m_later,
              return_1d, return_1w, return_1m, prediction_correct, hold_days, return_at_hold)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            resolved_task_id,
             date, symbol, decision, price_at_prediction,
             price_1d_later, price_1w_later, price_1m_later,
             return_1d, return_1w, return_1m,
@@ -1155,19 +1766,26 @@ def save_backtest_result(date: str, symbol: str, decision: str,
         conn.close()
 
 
-def get_backtest_result(date: str, symbol: str) -> Optional[dict]:
-    """Get backtest result for a specific stock and date."""
+def get_backtest_result(date: str = None, symbol: str = None, task_id: str = None) -> Optional[dict]:
+    """Get backtest result for a specific stock and date/task."""
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        cursor.execute("""
-            SELECT * FROM backtest_results WHERE date = ? AND symbol = ?
-        """, (date, symbol))
+        resolved_task_id = _resolve_task_id_for_read(task_id=task_id, date=date)
+        if resolved_task_id:
+            cursor.execute("""
+                SELECT * FROM backtest_results WHERE task_id = ? AND symbol = ?
+            """, (resolved_task_id, symbol))
+        else:
+            cursor.execute("""
+                SELECT * FROM backtest_results WHERE date = ? AND symbol = ?
+            """, (date, symbol))
         row = cursor.fetchone()
 
         if row:
             return {
+                'task_id': row['task_id'] if 'task_id' in row.keys() else resolved_task_id,
                 'date': row['date'],
                 'symbol': row['symbol'],
                 'decision': row['decision'],
@@ -1188,15 +1806,21 @@ def get_backtest_result(date: str, symbol: str) -> Optional[dict]:
         conn.close()
 
 
-def get_backtest_results_by_date(date: str) -> list:
-    """Get all backtest results for a specific date."""
+def get_backtest_results_by_date(date: str = None, task_id: str = None) -> list:
+    """Get all backtest results for a specific date/task."""
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        cursor.execute("""
-            SELECT * FROM backtest_results WHERE date = ?
-        """, (date,))
+        resolved_task_id = _resolve_task_id_for_read(task_id=task_id, date=date)
+        if resolved_task_id:
+            cursor.execute("""
+                SELECT * FROM backtest_results WHERE task_id = ?
+            """, (resolved_task_id,))
+        else:
+            cursor.execute("""
+                SELECT * FROM backtest_results WHERE date = ?
+            """, (date,))
 
         return [
             {
@@ -1264,7 +1888,7 @@ def get_all_backtest_results() -> list:
         cursor.execute("""
             SELECT br.*, sa.confidence, sa.risk
             FROM backtest_results br
-            LEFT JOIN stock_analysis sa ON br.date = sa.date AND br.symbol = sa.symbol
+            LEFT JOIN stock_analysis sa ON br.task_id = sa.task_id AND br.symbol = sa.symbol
             WHERE br.prediction_correct IS NOT NULL
             ORDER BY br.date DESC
         """)
@@ -1309,12 +1933,11 @@ def calculate_accuracy_metrics() -> dict:
     }
 
     try:
-        # Join backtest_results with stock_analysis to get the correct decision
         cursor.execute("""
             SELECT br.date, br.symbol, br.return_1d, br.return_1w, br.return_at_hold,
                    sa.decision as sa_decision, sa.confidence
             FROM backtest_results br
-            JOIN stock_analysis sa ON br.date = sa.date AND br.symbol = sa.symbol
+            JOIN stock_analysis sa ON br.task_id = sa.task_id AND br.symbol = sa.symbol
             WHERE br.return_1d IS NOT NULL OR br.return_at_hold IS NOT NULL
         """)
         rows = cursor.fetchall()
@@ -1322,7 +1945,6 @@ def calculate_accuracy_metrics() -> dict:
         if not rows:
             return empty
 
-        # Compute accuracy using sanitized decisions and primaryReturn logic
         total = 0
         correct = 0
         by_decision = {'BUY': {'total': 0, 'correct': 0}, 'SELL': {'total': 0, 'correct': 0}, 'HOLD': {'total': 0, 'correct': 0}}
@@ -1349,7 +1971,6 @@ def calculate_accuracy_metrics() -> dict:
                 if decision in by_decision:
                     by_decision[decision]['correct'] += 1
 
-        # Build response
         for d in by_decision:
             t = by_decision[d]['total']
             c = by_decision[d]['correct']
@@ -1366,8 +1987,8 @@ def calculate_accuracy_metrics() -> dict:
         conn.close()
 
 
-def compute_stock_rankings(date: str):
-    """Compute and store rank (1..N) for all stocks analyzed on a given date.
+def compute_stock_rankings(date: str = None, task_id: str = None):
+    """Compute and store rank (1..N) for all stocks analyzed on a given date/task.
 
     Uses a deterministic composite score:
       decision:   BUY=30, HOLD=15, SELL=0
@@ -1381,14 +2002,22 @@ def compute_stock_rankings(date: str):
     CONFIDENCE_W = {'HIGH': 20, 'MEDIUM': 10, 'LOW': 0}
     RISK_W = {'LOW': 15, 'MEDIUM': 8, 'HIGH': 0}
 
+    resolved_task_id = _resolve_task_id_for_read(task_id=task_id, date=date)
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        cursor.execute("""
-            SELECT id, symbol, decision, confidence, risk, hold_days
-            FROM stock_analysis WHERE date = ?
-        """, (date,))
+        if resolved_task_id:
+            cursor.execute("""
+                SELECT id, symbol, decision, confidence, risk, hold_days
+                FROM stock_analysis WHERE task_id = ?
+            """, (resolved_task_id,))
+        else:
+            cursor.execute("""
+                SELECT id, symbol, decision, confidence, risk, hold_days
+                FROM stock_analysis WHERE date = ?
+            """, (date,))
         rows = cursor.fetchall()
 
         if not rows:
@@ -1405,7 +2034,6 @@ def compute_stock_rankings(date: str):
             score += CONFIDENCE_W.get(confidence, 0)
             score += RISK_W.get(risk, 0)
 
-            # Hold days bonus: BUY with shorter hold = more immediate opportunity
             if decision == 'BUY' and hold_days and hold_days > 0:
                 if hold_days <= 5:
                     score += 5
@@ -1420,7 +2048,6 @@ def compute_stock_rankings(date: str):
 
             scored.append((row['id'], row['symbol'], score))
 
-        # Sort by score descending, then symbol ascending for ties
         scored.sort(key=lambda x: (-x[2], x[1]))
 
         for rank, (row_id, _symbol, _score) in enumerate(scored, start=1):
@@ -1434,29 +2061,33 @@ def compute_stock_rankings(date: str):
         conn.close()
 
 
-def update_daily_recommendation_summary(date: str):
-    """Auto-create/update daily_recommendations from stock_analysis for a date.
+def update_daily_recommendation_summary(date: str = None, task_id: str = None):
+    """Auto-create/update daily_recommendations from stock_analysis for a date/task.
 
     Computes rankings first, then counts BUY/SELL/HOLD decisions, generates
     rank-ordered top_picks and stocks_to_avoid, and upserts the row.
     """
-    # Compute rankings first so top_picks/stocks_to_avoid use rank order
-    compute_stock_rankings(date)
+    resolved_task_id = _resolve_task_id_for_read(task_id=task_id, date=date)
+    if not resolved_task_id:
+        return
+
+    compute_stock_rankings(date=date, task_id=resolved_task_id)
 
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        # Get all stock analyses ordered by rank
         cursor.execute("""
-            SELECT symbol, company_name, decision, confidence, risk, raw_analysis, rank
-            FROM stock_analysis WHERE date = ?
+            SELECT symbol, company_name, decision, confidence, risk, raw_analysis, rank, date
+            FROM stock_analysis WHERE task_id = ?
             ORDER BY rank ASC NULLS LAST
-        """, (date,))
+        """, (resolved_task_id,))
         rows = cursor.fetchall()
 
         if not rows:
             return
+
+        effective_date = rows[0]['date'] if rows else date
 
         buy_count = 0
         sell_count = 0
@@ -1489,7 +2120,6 @@ def update_daily_recommendation_summary(date: str):
 
         total = buy_count + sell_count + hold_count
 
-        # Top picks: top 5 BUY stocks by rank (already rank-sorted)
         top_picks = [
             {'symbol': s['symbol'], 'company_name': s['company_name'],
              'confidence': s['confidence'], 'reason': s['reason'],
@@ -1497,7 +2127,6 @@ def update_daily_recommendation_summary(date: str):
             for s in buy_stocks[:5]
         ]
 
-        # Stocks to avoid: all SELL stocks
         stocks_to_avoid = [
             {'symbol': s['symbol'], 'company_name': s['company_name'],
              'confidence': s['confidence'], 'reason': s['reason'],
@@ -1507,10 +2136,12 @@ def update_daily_recommendation_summary(date: str):
 
         cursor.execute("""
             INSERT OR REPLACE INTO daily_recommendations
-            (date, summary_total, summary_buy, summary_sell, summary_hold, top_picks, stocks_to_avoid)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (task_id, date, summary_total, summary_buy, summary_sell, summary_hold, top_picks, stocks_to_avoid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            date, total, buy_count, sell_count, hold_count,
+            resolved_task_id,
+            effective_date,
+            total, buy_count, sell_count, hold_count,
             json.dumps(top_picks),
             json.dumps(stocks_to_avoid)
         ))
@@ -1539,7 +2170,3 @@ def rebuild_all_daily_recommendations():
 
     if dates:
         print(f"[DB] Rebuilt daily_recommendations for {len(dates)} dates: {sorted(dates)}")
-
-
-# Initialize database on module import
-init_db()

@@ -24,6 +24,15 @@ from rich import box
 from rich.align import Align
 from rich.rule import Rule
 
+import sys
+
+# Initialize frontend database after .env is loaded
+FRONTEND_BACKEND_PATH = Path(__file__).parent.parent / "frontend" / "backend"
+if str(FRONTEND_BACKEND_PATH) not in sys.path:
+    sys.path.insert(0, str(FRONTEND_BACKEND_PATH))
+import database as frontend_db
+frontend_db.init_db()
+
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.dataflows.markets import is_nifty_50_stock, NIFTY_50_STOCKS

@@ -1,10 +1,19 @@
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 
+import sys
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Initialize frontend database after .env is loaded
+FRONTEND_BACKEND_PATH = Path(__file__).parent / "frontend" / "backend"
+if str(FRONTEND_BACKEND_PATH) not in sys.path:
+    sys.path.insert(0, str(FRONTEND_BACKEND_PATH))
+import database as frontend_db
+frontend_db.init_db()
 
 # Create a custom config
 config = DEFAULT_CONFIG.copy()
